@@ -5,6 +5,7 @@
 //! what counts.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::OnceLock;
 
 use shroudlink_sdk::ui::{Event, Item, MenuEntry, Node, ToClient, UiEvent, Window};
 use shroudlink_sdk::{export_mod, log, Host, Mod, Value, World};
@@ -14,6 +15,29 @@ const ID: &str = "storage";
 const RADIUS: f64 = 40.0;
 /// Item slots shown at most.
 const SHOWN: usize = 64;
+/// Item id -> debug name for the current build (chestsort's table, see its categories).
+const ITEM_NAMES: &str = include_str!("../../chestsort/items.tsv");
+
+/// Lower-case debug names by item id.
+fn item_names() -> &'static HashMap<u32, String> {
+    static NAMES: OnceLock<HashMap<u32, String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        ITEM_NAMES
+            .lines()
+            .filter_map(|line| {
+                let (id, name) = line.split_once('\t')?;
+                Some((id.parse().ok()?, name.to_lowercase()))
+            })
+            .collect()
+    })
+}
+
+/// Does the item's name contain every word of `query` (case-insensitive)? Like the
+/// search in chestsort's Chest categories window.
+fn matches(item: u32, query: &str) -> bool {
+    let Some(name) = item_names().get(&item) else { return false };
+    query.split_whitespace().all(|w| name.contains(&w.to_lowercase()))
+}
 
 /// Everything stored around a player: item -> (total, the stacks holding it).
 #[derive(Default)]
@@ -35,9 +59,10 @@ fn contents(world: &World, player: u32) -> Contents {
     out
 }
 
-/// The items shown, most first (the grid's click index points into this).
-fn shown(contents: &Contents) -> Vec<(u32, u32)> {
-    let mut items: Vec<(u32, u32)> = contents.items.iter().map(|(&item, &(total, _))| (item, total)).collect();
+/// The items shown, most first (the grid's click index points into this); with a search,
+/// only the matching ones.
+fn shown(contents: &Contents, query: &str) -> Vec<(u32, u32)> {
+    let mut items: Vec<(u32, u32)> = contents.items.iter().filter(|(&item, _)| query.is_empty() || matches(item, query)).map(|(&item, &(total, _))| (item, total)).collect();
     items.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     items.truncate(SHOWN);
     items
@@ -48,6 +73,8 @@ pub struct Storage {
     /// what each client's window shows, for its click indices
     showing: HashMap<u64, Vec<(u32, u32)>>,
     status: HashMap<u64, String>,
+    /// the search per client
+    searches: HashMap<u64, String>,
 }
 
 impl Storage {
@@ -57,9 +84,14 @@ impl Storage {
         match world.player_of(client) {
             None => content.push(Node::Text { text: "Open any chest once, so the server knows which player you are.".into() }),
             Some(player) => {
+                let query = self.searches.get(&client).cloned().unwrap_or_default();
                 let all = contents(&world, player);
-                let items = shown(&all);
+                let items = shown(&all, &query);
                 content.push(Node::Text { text: format!("{} chest(s) within {RADIUS:.0} m, {} kind(s) of items. Click an item to take it.", all.chests, all.items.len()) });
+                content.push(Node::TextInput { id: "search".into(), value: query.clone(), hint: "Search items, e.g. iron bar".into() });
+                if !query.is_empty() {
+                    content.push(Node::Text { text: format!("{} kind(s) match \"{query}\"", items.len()) });
+                }
                 content.push(Node::ItemGrid { id: "items".into(), columns: 8, items: items.iter().map(|&(id, count)| Item { id, count }).collect() });
                 self.showing.insert(client, items);
             }
@@ -104,6 +136,13 @@ impl Mod for Storage {
         let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
         match (node.as_str(), event) {
             ("open", Event::Menu) | ("refresh", Event::Click { .. }) => {}
+            ("search", Event::Submit { value }) => {
+                self.searches.insert(client, value.trim().to_owned());
+            }
+            (_, Event::Closed) => {
+                self.searches.remove(&client);
+                return;
+            }
             ("items", Event::Click { index: Some(i) }) => {
                 let item = self.showing.get(&client).and_then(|s| s.get(i as usize)).map(|&(item, _)| item);
                 if let Some(item) = item {
@@ -120,6 +159,7 @@ impl Mod for Storage {
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
         self.showing.remove(&client);
         self.status.remove(&client);
+        self.searches.remove(&client);
     }
 }
 
@@ -135,6 +175,18 @@ mod tests {
         c.items.insert(5, (3, vec![(100, 1)]));
         c.items.insert(7, (40, vec![(100, 2), (101, 3)]));
         c.items.insert(6, (40, vec![(101, 4)]));
-        assert_eq!(shown(&c), vec![(6, 40), (7, 40), (5, 3)]);
+        assert_eq!(shown(&c, ""), vec![(6, 40), (7, 40), (5, 3)]);
+    }
+
+    #[test]
+    fn the_search_keeps_matching_items_only() {
+        // 159114158 is the iron bar in this build's table
+        let iron = 159114158;
+        assert!(matches(iron, "iron bar") && matches(iron, "IRON") && !matches(iron, "wood"));
+        let mut c = Contents::default();
+        c.items.insert(iron, (5, vec![(100, 1)]));
+        c.items.insert(4077117519, (9, vec![(100, 2)]));
+        assert_eq!(shown(&c, "iron"), vec![(iron, 5)]);
+        assert_eq!(shown(&c, "").len(), 2);
     }
 }
