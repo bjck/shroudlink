@@ -1,4 +1,5 @@
-//! chestsort server mod.
+//! shroudlink server core: hooks the game, hosts the channel to client addons and
+//! loads the mods in `shroudlink_mods/` (chestsort is one of them).
 //!
 //! The same DLL can be installed under two names next to `enshrouded_server.exe`:
 //! - `crashhandler64.dll` (recommended): `steamclient64.dll` probes for Steam's
@@ -9,12 +10,10 @@
 //!   `steam_api64_o.dll` and all Steam calls are passed through to it. Proton
 //!   replaces Steam's own client DLL, so `crashhandler64.dll` is never probed there.
 
-mod categories;
-mod chestsort_ui;
-mod deposit;
+mod events;
 mod game;
+mod game_api;
 mod link_host;
-mod locks;
 mod mods;
 mod names;
 mod plugins;
@@ -105,9 +104,9 @@ fn init() {
     if !claim_process() {
         return;
     }
-    chestsort_common::log::init("chestsort.log");
+    chestsort_common::log::init("shroudlink.log");
     log!(
-        "chestsort server {} starting (loaded as {})",
+        "shroudlink server {} starting (loaded as {})",
         env!("CARGO_PKG_VERSION"),
         own_file_name().unwrap_or_else(|| "?".into())
     );
@@ -128,21 +127,17 @@ fn init() {
             return;
         }
     };
-    log!("deposit function at +{:#x}", module.rva(game.deposit_into_chest as usize));
-    match deposit::install(game) {
-        Ok(()) => log!("hook installed"),
+    log!("quick stack at +{:#x}, move all at +{:#x}", module.rva(game.deposit_into_chest as usize), module.rva(game.move_all as usize));
+    match events::install(game) {
+        Ok(()) => log!("inventory hooks installed"),
         Err(e) => {
-            log!("{e}; mod disabled");
+            log!("{e}; mods get no inventory events");
             return;
         }
     }
-    categories::init();
     names::start();
     match link_host::install(&module) {
-        Ok(()) => {
-            mods::register(Box::new(chestsort_ui::ChestsortUi::default()));
-            plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR));
-        }
+        Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),
         Err(e) => log!("shroudlink host disabled: {e}"),
     }
 }

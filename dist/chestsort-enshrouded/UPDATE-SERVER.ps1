@@ -72,16 +72,18 @@ function RemoteText($path) { Get-SFTPContent -SessionId $sid -Path (Remote $path
 function RemoteRename($path, $newName) { Rename-SFTPFile -SessionId $sid -Path (Remote $path) -NewName $newName }
 function HostBuild { Get-BuildId (RemoteText 'steamapps/appmanifest_2278520.acf') }
 
-# Uploads $local as remote file $name: first as $name.new, then the old file is renamed
-# to $name.$keepSuffix and the new one takes its place.
+# Uploads $local as remote file $name (a path like "shroudlink_mods/x.dll"): first as
+# $name.new, then the old file is renamed to $name.$keepSuffix and the new one takes its place.
 function Upload($local, $name, $keepSuffix) {
-    $tmp = Join-Path $env:TEMP "$name.new"
+    $leaf = Split-Path $name -Leaf
+    $dir = Remote (Split-Path $name -Parent)
+    $tmp = Join-Path $env:TEMP "$leaf.new"
     Copy-Item $local $tmp -Force
-    Set-SFTPItem -SessionId $sid -Path $tmp -Destination '/' -Force
+    Set-SFTPItem -SessionId $sid -Path $tmp -Destination $dir -Force
     Remove-Item $tmp
     if ((RemoteSize "$name.new") -ne (Get-Item $local).Length) { throw "upload of $name is incomplete" }
-    if (Exists $name) { RemoteRename $name "$name.$keepSuffix" }
-    RemoteRename "$name.new" $name
+    if (Exists $name) { RemoteRename $name "$leaf.$keepSuffix" }
+    RemoteRename "$name.new" $leaf
     Info "$name uploaded ($((Get-Item $local).Length) bytes)"
 }
 
@@ -154,7 +156,10 @@ try {
     Step '6. Uploading patched files and the mod'
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc') 'enshrouded_server.kfc' "vanilla-$build"
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc_resources') 'enshrouded_server.kfc_resources' "vanilla-$build"
+    # the shroudlink core (as Steam's DLL, which it passes every call on to) and the chestsort mod
     Upload (Join-Path $repatch 'steam_api64.dll') 'steam_api64.dll' "before-$stamp"
+    if (-not (Exists 'shroudlink_mods')) { New-SFTPItem -SessionId $sid -Path '/shroudlink_mods' -ItemType Directory | Out-Null }
+    Upload (Join-Path $PSScriptRoot 'shroudlink_mods\chestsort.dll') 'shroudlink_mods/chestsort.dll' "before-$stamp"
     if (-not (Exists 'steam_api64_o.dll')) {
         Write-Host '   WARNING: steam_api64_o.dll (the original Steam DLL) is missing on the server!' -ForegroundColor Red
         Write-Host '   The mod cannot start without it. Ask for help before starting the server.' -ForegroundColor Red
@@ -176,9 +181,10 @@ try {
     Wait-User ('Panel: turn AUTO UPDATE OFF (otherwise the next start can undo the patch), then START the server. ' +
                'Watch the console: if it prints "Deleted ... items from stack", STOP it immediately - ' +
                "your backup is in $backup.")
-    $log = (RemoteText 'chestsort.log') -split "`n" | Select-Object -Last 8
+    $logName = if (Exists 'shroudlink.log') { 'shroudlink.log' } else { 'chestsort.log' }
+    $log = (RemoteText $logName) -split "`n" | Select-Object -Last 8
     Write-Host ''
-    Info 'end of the mod log (should show "hook installed" and "mod ''chestsort'' registered"):'
+    Info 'end of the mod log (should show "inventory hooks installed" and "mod ''chestsort'' registered"):'
     $log | ForEach-Object { Info $_ }
     Write-Host ''
     Write-Host 'Done.' -ForegroundColor Green

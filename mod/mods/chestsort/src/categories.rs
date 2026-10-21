@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use chestsort_common::log;
+use shroudlink_sdk::log;
 use serde::Deserialize;
 
 const DEFAULT_FILE: &str = include_str!("../categories.json");
@@ -51,7 +51,7 @@ struct State {
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 fn path() -> PathBuf {
-    chestsort_common::game_dir().join(FILE_NAME)
+    shroudlink_sdk::server_dir().join(FILE_NAME)
 }
 
 fn modified() -> Option<SystemTime> {

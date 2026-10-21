@@ -35,8 +35,8 @@ See the releases: `shroudlink-client.zip` (players) and `chestsort-enshrouded.zi
 ## Layout
 | Path | Content |
 |---|---|
-| `mod/` | Rust workspace: `server`, `client`, `link` (protocol), `sdk` + `examples/hello_mod` (plugin API), `common`, `eml` (data mods) |
-| `mod/MODDING.md` | How to write your own shroudlink mod |
+| `mod/` | Rust workspace: `server` (core), `mods/chestsort`, `client`, `link` (protocol), `sdk` + `examples/hello_mod` (mod API), `common`, `eml` (data mods) |
+| `mod/MODDING.md` | How to write your own shroudlink mod (`mod/docs/sdk-v2.md`: API design) |
 | `dist/chestsort-enshrouded/` | Server package: README, `UPDATE-SERVER.bat` (safe game updates), `repatch/` |
 | `research/scripts/` | Reverse-engineering helpers (Ghidra scripts, signatures, hot reload, screenshots) |
 
@@ -44,7 +44,8 @@ See the releases: `shroudlink-client.zip` (players) and `chestsort-enshrouded.zi
 ```
 cd mod
 cargo build --release
-# target/release/chestsort.dll         -> server, install as steam_api64.dll (original renamed to steam_api64_o.dll)
+# target/release/shroudlink_server.dll -> server core, install as steam_api64.dll (original renamed to steam_api64_o.dll)
+# target/release/chestsort.dll         -> server mod, put into shroudlink_mods/ next to enshrouded_server.exe
 # target/release/shroudlink_client.dll -> client, install as dinput8.dll next to enshrouded.exe
 ```
 Tested with server build 26083076 / client 26082781. Functions are located by byte

@@ -47,6 +47,8 @@ Copy-Item (Join-Path $server 'enshrouded_server.kfc'), (Join-Path $server 'enshr
 # empty data containers the patched file expects
 Get-ChildItem $server -Filter 'enshrouded_server_*.dat' | Where-Object Length -eq 0 | Copy-Item -Destination $out -Force
 Copy-Item (Join-Path $here 'steam_api64.dll') $out -Force
+# the chestsort mod goes into shroudlink_mods/ on the server
+Copy-Item (Join-Path (Split-Path $here) 'shroudlink_mods') $out -Recurse -Force
 
 Write-Host ''
 Write-Host "Done. Upload the files in $out (see README.txt)."

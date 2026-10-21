@@ -25,23 +25,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "chestsort"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shroudlink-sdk",
+]
+
+[[package]]
 name = "chestsort-common"
 version = "0.1.0"
 dependencies = [
  "iced-x86",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "chestsort-server"
-version = "0.1.0"
-dependencies = [
- "chestsort-common",
- "retour",
- "serde",
- "serde_json",
- "shroudlink",
- "shroudlink-sdk",
  "windows-sys 0.61.2",
 ]
 
@@ -258,6 +254,19 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "shroudlink",
+]
+
+[[package]]
+name = "shroudlink-server"
+version = "0.1.0"
+dependencies = [
+ "chestsort-common",
+ "retour",
+ "serde",
+ "serde_json",
+ "shroudlink",
+ "shroudlink-sdk",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

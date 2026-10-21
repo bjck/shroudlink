@@ -132,6 +132,11 @@ impl Host {
         if slot >= SLOTS {
             return None;
         }
+        // mods: messages sent during inventory events, and new builds of their DLLs
+        for (client, message) in mods::take_queued() {
+            self.send(client, &message);
+        }
+        crate::plugins::reload_changed(self);
         if self.slot(slot).gen != Some(gen) {
             self.end_session(slot);
             let state = self.slot(slot);
@@ -397,92 +402,5 @@ mod tests {
         let other = String::from("a chest name");
         assert!(!host.confirm(2, string_id(other.as_bytes()), other.as_ptr()));
         assert!(host.poll(SLOTS, 1).is_none());
-    }
-}
-
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
-    use crate::mods;
-    use shroudlink::ui::{Event, UiEvent};
-    use shroudlink::{encode_packet, split_message};
-
-    fn connect(host: &mut Host, slot: usize, nonce: u64) {
-        while let Some(p) = host.poll(slot, 1) {
-            let (id, ptr) = (p.id, p.text.as_ptr());
-            host.confirm(slot, id, ptr);
-        }
-        host.receive_packet(encode_packet(&Frame::Claim { nonce, slot: slot as u8 }.encode()).as_bytes());
-    }
-
-    fn received(host: &mut Host, slot: usize, nonce: u64) -> Vec<Value> {
-        let mut r = Reassembler::default();
-        let mut out = Vec::new();
-        while let Some(p) = host.poll(slot, 1) {
-            let (id, ptr) = (p.id, p.text.as_ptr());
-            if let Some(Frame::Data { nonce: n, msg, chunk, count, bytes }) = decode_packet(p.text.as_bytes()).as_deref().and_then(Frame::decode) {
-                if n == nonce {
-                    if let Some(m) = r.push(n, msg, chunk, count, bytes) {
-                        out.push(serde_json::from_slice(&m).unwrap());
-                    }
-                }
-            }
-            host.confirm(slot, id, ptr);
-        }
-        out
-    }
-
-    fn click(host: &mut Host, nonce: u64, msg: u32, event: UiEvent) {
-        let bytes = serde_json::to_vec(&event.to_message("chestsort")).unwrap();
-        for packet in split_message(nonce, msg, &bytes) {
-            host.receive_packet(packet.as_bytes());
-        }
-    }
-
-    #[test]
-    fn chestsort_category_browser() {
-        mods::register(Box::new(crate::chestsort_ui::ChestsortUi::default()));
-        let mut host = Host::default();
-        let nonce = 0x77;
-        connect(&mut host, 5, nonce);
-        let joined = received(&mut host, 5, nonce);
-        let entries = joined.iter().find(|m| m["mod"] == "ui" && m["op"] == "entries").expect("menu entry");
-        assert_eq!(entries["entries"][0]["id"], "categories");
-
-        click(&mut host, nonce, 1, UiEvent { window: String::new(), node: "categories".into(), event: Event::Menu });
-        let open = received(&mut host, 5, nonce);
-        let window = &open[0]["window"];
-        assert_eq!(window["id"], "categories");
-        let list = window["content"].as_array().unwrap().iter().find(|n| n["type"] == "list").unwrap();
-        assert!(list["entries"].as_array().unwrap().len() >= 10);
-
-        click(&mut host, nonce, 2, UiEvent { window: "categories".into(), node: "category".into(), event: Event::Click { index: Some(0) } });
-        let open = received(&mut host, 5, nonce);
-        let content = open[0]["window"]["content"].as_array().unwrap();
-        let grid = content.iter().find(|n| n["type"] == "item_grid").expect("item grid for the category");
-        assert!(!grid["items"].as_array().unwrap().is_empty());
-        assert!(grid["items"][0]["id"].as_u64().unwrap() > 0);
-
-        // item search through the text field
-        let submit = UiEvent { window: "categories".into(), node: "search".into(), event: Event::Submit { value: "iron bar".into() } };
-        let bytes = serde_json::to_vec(&submit.to_message("chestsort")).unwrap();
-        for packet in split_message(nonce, 9, &bytes) {
-            host.receive_packet(packet.as_bytes());
-        }
-        let open = received(&mut host, 5, nonce);
-        let content = open[0]["window"]["content"].as_array().unwrap();
-        assert_eq!(content.iter().find(|n| n["type"] == "text_input").unwrap()["value"], "iron bar");
-        let found = content.iter().find(|n| n["id"] == "found:Ores").expect("iron bar listed under Ores");
-        assert!(!found["items"].as_array().unwrap().is_empty());
-        assert!(content.iter().any(|n| n["type"] == "heading" && n["text"].as_str().unwrap().starts_with("Ores · chest names:")));
-
-        // paging: every Next click advances one page
-        click(&mut host, nonce, 3, UiEvent { window: "categories".into(), node: "category".into(), event: Event::Click { index: Some(7) } });
-        received(&mut host, 5, nonce);
-        for (msg, page) in [(4u32, 2), (5, 3), (6, 4)] {
-            click(&mut host, nonce, msg, UiEvent { window: "categories".into(), node: "next".into(), event: Event::Click { index: None } });
-            let open = received(&mut host, 5, nonce);
-            assert!(open[0]["window"].to_string().contains(&format!("Page {page} /")), "after Next: {}", open[0]["window"]);
-        }
     }
 }

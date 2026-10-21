@@ -3,32 +3,28 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
-use shroudlink::ui::{Event, Item, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink_sdk::ui::{Event, Item, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink_sdk::{Host, Value};
 
-use crate::categories;
-use crate::link_host::Host;
-use crate::mods::{ClientId, ServerMod};
-
-const ID: &str = "chestsort";
+use crate::{categories, ID};
 const MENU_CATEGORIES: &str = "categories";
 const WINDOW: &str = "categories";
 /// Item slots shown per category page.
 const PAGE: usize = 32;
 
 #[derive(Default)]
-pub struct ChestsortUi {
+pub struct Ui {
     /// selected category per client
-    selected: HashMap<ClientId, (String, usize)>,
+    selected: HashMap<u64, (String, usize)>,
     /// last item search per client
-    searches: HashMap<ClientId, String>,
+    searches: HashMap<u64, String>,
 }
 
 /// Search results shown at most.
 const SEARCH_LIMIT: usize = 48;
 
-impl ChestsortUi {
-    fn window(&self, client: ClientId) -> Window {
+impl Ui {
+    fn window(&self, client: u64) -> Window {
         let overview = categories::overview();
         let names: Vec<String> = overview.iter().map(|(n, _, ids)| format!("{n} ({})", ids.len())).collect();
         let query = self.searches.get(&client).cloned().unwrap_or_default();
@@ -83,18 +79,14 @@ impl ChestsortUi {
         Window { id: WINDOW.into(), title: "Chest categories".into(), content }
     }
 
-    fn show(&self, host: &mut Host, client: ClientId) {
+    fn show(&self, host: &mut Host, client: u64) {
         let open = ToClient::Open { owner: ID.into(), window: self.window(client) };
         host.send(client, &open.to_message());
     }
 }
 
-impl ServerMod for ChestsortUi {
-    fn id(&self) -> &'static str {
-        ID
-    }
-
-    fn on_join(&mut self, host: &mut Host, client: ClientId) {
+impl Ui {
+    pub fn on_join(&mut self, host: &mut Host, client: u64) {
         let entries = ToClient::Entries {
             owner: ID.into(),
             entries: vec![MenuEntry { id: MENU_CATEGORIES.into(), label: "Chest categories".into() }],
@@ -102,15 +94,7 @@ impl ServerMod for ChestsortUi {
         host.send(client, &entries.to_message());
     }
 
-    fn on_message(&mut self, host: &mut Host, client: ClientId, message: &Value) {
-        // the addon's locked inventory slots (`entity | slot << 32`): deposits skip them
-        if message.get("op").and_then(Value::as_str) == Some("locks") {
-            let slots: std::collections::HashSet<u64> =
-                message.get("slots").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
-            chestsort_common::log!("chestsort: client {:016x} locked {} slot(s)", client.0, slots.len());
-            crate::locks::set(client, slots);
-            return;
-        }
+    pub fn on_message(&mut self, host: &mut Host, client: u64, message: &Value) {
         let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
         match (node.as_str(), event) {
             (MENU_CATEGORIES, Event::Menu) => self.show(host, client),
@@ -138,8 +122,7 @@ impl ServerMod for ChestsortUi {
         }
     }
 
-    fn on_leave(&mut self, _host: &mut Host, client: ClientId) {
-        crate::locks::forget(client);
+    pub fn on_leave(&mut self, client: u64) {
         self.selected.remove(&client);
         self.searches.remove(&client);
     }

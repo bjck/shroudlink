@@ -5,10 +5,12 @@
 //! answers a joining client with the list of mods, so the addon knows what the
 //! server offers without being updated for new mods.
 
+use std::ffi::c_void;
 use std::sync::Mutex;
 
 use chestsort_common::log;
 use serde_json::{json, Value};
+use shroudlink_sdk::InventoryEvent;
 
 use crate::link_host::Host;
 
@@ -25,6 +27,14 @@ pub trait ServerMod: Send {
     fn on_join(&mut self, _host: &mut Host, _client: ClientId) {}
     fn on_message(&mut self, host: &mut Host, client: ClientId, message: &Value);
     fn on_leave(&mut self, _host: &mut Host, _client: ClientId) {}
+    /// Slots of `event.from` that must not move (`game`: the event for the game API).
+    fn keep(&mut self, _game: *mut c_void, _event: &InventoryEvent) -> Vec<u64> {
+        Vec::new()
+    }
+    /// Moves stacks before the game's own transfer; returns the number of items moved.
+    fn on_transfer(&mut self, _game: *mut c_void, _event: &InventoryEvent) -> u32 {
+        0
+    }
 }
 
 static MODS: Mutex<Vec<Box<dyn ServerMod>>> = Mutex::new(Vec::new());
@@ -32,6 +42,41 @@ static MODS: Mutex<Vec<Box<dyn ServerMod>>> = Mutex::new(Vec::new());
 pub fn register(m: Box<dyn ServerMod>) {
     log!("shroudlink: mod '{}' registered", m.id());
     MODS.lock().unwrap_or_else(|e| e.into_inner()).push(m);
+}
+
+/// Swaps in a new build of a mod (hot reload) and welcomes the connected clients again.
+pub(crate) fn replace(host: &mut Host, mut m: Box<dyn ServerMod>) {
+    let clients = host.clients();
+    with_mods(|mods| {
+        for &client in &clients {
+            m.on_join(host, client);
+        }
+        match mods.iter_mut().find(|old| old.id() == m.id()) {
+            Some(old) => *old = m,
+            None => mods.push(m),
+        }
+    });
+}
+
+/// Messages mods sent during an inventory event, delivered by the next network update.
+static QUEUED: Mutex<Vec<(ClientId, Value)>> = Mutex::new(Vec::new());
+
+pub(crate) fn queue(client: ClientId, message: Value) {
+    QUEUED.lock().unwrap_or_else(|e| e.into_inner()).push((client, message));
+}
+
+pub(crate) fn take_queued() -> Vec<(ClientId, Value)> {
+    std::mem::take(&mut *QUEUED.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Every mod's slots to keep in an inventory event.
+pub(crate) fn keep(game: *mut c_void, event: &InventoryEvent) -> Vec<u64> {
+    with_mods(|mods| mods.iter_mut().flat_map(|m| m.keep(game, event)).collect())
+}
+
+/// Lets every mod move stacks; returns the items moved in total.
+pub(crate) fn transfer(game: *mut c_void, event: &InventoryEvent) -> u32 {
+    with_mods(|mods| mods.iter_mut().map(|m| m.on_transfer(game, event)).sum())
 }
 
 fn with_mods<R>(f: impl FnOnce(&mut Vec<Box<dyn ServerMod>>) -> R) -> R {

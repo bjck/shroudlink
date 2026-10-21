@@ -1,12 +1,12 @@
 [package]
-name = "chestsort-server"
+name = "shroudlink-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-# installed as crashhandler64.dll (or dinput8.dll), see src/lib.rs
-name = "chestsort"
+# installed as steam_api64.dll (or crashhandler64.dll / dinput8.dll), see src/lib.rs
+name = "shroudlink_server"
 crate-type = ["cdylib"]
 
 [dependencies]

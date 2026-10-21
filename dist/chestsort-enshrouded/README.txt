@@ -6,7 +6,7 @@ chestsort - Enshrouded server mod
 - Chests have 2x the slots (max 128), and items that stack hold 10x as many.
 
 Categories and the words that work in chest names are in chestsort_categories.json
-on the server. Edits apply within seconds; mistakes are reported in chestsort.log.
+on the server. Edits apply within seconds; mistakes are reported in shroudlink.log.
 
 
 WHEN A GAME UPDATE COMES OUT

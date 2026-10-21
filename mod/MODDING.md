@@ -6,10 +6,11 @@ All mod logic runs on the server; players install one small, generic client addo
 ```
  server (enshrouded_server.exe)                      player (enshrouded.exe)
  ┌───────────────────────────────┐                  ┌─────────────────────────────┐
- │ steam_api64.dll  (host)       │  game netcode    │ dinput8.dll  (client addon) │
- │  ├─ built-in mods (chestsort) │◀────────────────▶│  ├─ channel                 │
+ │ steam_api64.dll  (core)       │  game netcode    │ dinput8.dll  (client addon) │
+ │  ├─ hooks + game API          │◀────────────────▶│  ├─ channel                 │
  │  └─ shroudlink_mods/*.dll     │ custom-string    │  └─ native UI renderer      │
- └───────────────────────────────┘ messages         └─────────────────────────────┘
+ │      (chestsort, your mod)    │ messages         │                             │
+ └───────────────────────────────┘                  └─────────────────────────────┘
 ```
 
 ## How the channel works
@@ -27,7 +28,40 @@ name tables or savegames.
 
 ## Writing a mod
 Build a DLL with the `shroudlink-sdk` crate and drop it into `shroudlink_mods/` next to
-`enshrouded_server.exe` (loaded at server start). See `examples/hello_mod`:
+`enshrouded_server.exe`. It is loaded at server start, and **reloaded within seconds
+whenever you overwrite it** while players are connected (hot reload). The design is in
+[`docs/sdk-v2.md`](docs/sdk-v2.md).
+
+A mod can:
+- talk to client addons and show windows in the MODS tab (`on_join`, `on_message`, `Host::send`);
+- take part in every inventory transfer (quick stack, move all, Quick Stack Station):
+  `keep` names slots that must stay, `on_transfer` moves stacks itself through `Game`
+  (`slots`, `is_player`, `chest_name`, `max_stack`, `move_stack`, `send`).
+
+Equipped items, the item in hand and the actionbar are always protected by the core.
+`mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).
+
+A minimal inventory mod:
+
+```rust
+use shroudlink_sdk::{export_mod, Game, InventoryEvent, Mod};
+
+#[derive(Default)]
+pub struct KeepTorches;
+
+impl Mod for KeepTorches {
+    fn id(&self) -> &'static str { "keep_torches" }
+    // never quick stack or move torches out of a player's inventory
+    fn keep(&mut self, game: &Game, event: &InventoryEvent) -> Vec<u64> {
+        if !game.is_player(event.from) { return Vec::new(); }
+        game.slots(event.from).iter().filter(|s| s.item == TORCH_ID).map(|s| s.id).collect()
+    }
+}
+
+export_mod!(KeepTorches);
+```
+
+A mod with UI (see `examples/hello_mod`):
 
 ```rust
 use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
@@ -61,8 +95,13 @@ export_mod!(Hello);
 
 Build: `cargo build --release -p hello_mod` → `target/release/hello_mod.dll`.
 
-The C ABI (`shroudlink_mod_v1`, `HostApi`, `ModDecl` in `sdk/src/lib.rs`) passes JSON text,
-so mods can be written in any language that can export a C function.
+The C ABI (`shroudlink_mod_v2`, `HostApi`, `ModDecl` in `sdk/src/lib.rs`) passes JSON text
+and plain structs, so mods can be written in any language that can export a C function.
+v1 mods (`shroudlink_mod_v1`) still load; they get no inventory events.
+
+Unit-test a mod without the game with `shroudlink_sdk::testing::MockHost`, which records
+what the mod sends (see the tests in `mods/chestsort/src/lib.rs`). Mod log lines
+(`shroudlink_sdk::log!`) go to the server's `shroudlink.log`.
 
 ## UI nodes
 Windows are trees of nodes (`link/src/ui.rs`), drawn with the game's widgets:
@@ -89,14 +128,15 @@ cursor is shown (e.g. a chest) appear as panels on the right.
   or press `/`, type: slots of both panels whose (localised) item name does not match turn
   grey while typing. `Esc` clears, a second `Esc` leaves the field, `X` clears.
 
-## Status (Oct 2026, game build 25988414)
+## Status (Oct 2026, game build 26083076)
 - Channel: verified end to end in game (beacon, claim, messages both ways, chunking).
 - Native UI, verified in game: MODS tab in the player menu, page with mod list, text,
   headings, lists (multi-column), buttons and paging, item grids with real item icons and
   clicks, text fields (typing, Enter, Esc) with the keyboard kept from the game.
 - Not clicked in game yet: toggles.
-- Host: unit tests cover sessions, chunking, reconnects, the chestsort UI mod (incl. paging)
-  and loading `hello_mod.dll` through the C ABI (`cargo test -p chestsort-server`).
+- Core: unit tests cover sessions, chunking, reconnects and loading `hello_mod.dll` through
+  the C ABI (`cargo test -p shroudlink-server`); the chestsort mod tests its UI and locks
+  with the SDK's mock host (`cargo test -p chestsort`).
 
 ## Lessons from the game's UI (keen UI)
 - Frames are identified by a 64-bit key; siblings need unique keys, and a key must stay with
@@ -111,7 +151,9 @@ cursor is shown (e.g. a chest) appear as panels on the right.
 | path | role |
 |---|---|
 | `link/` | protocol + UI schema (shared) |
-| `server/` | host (`steam_api64.dll` proxy) incl. chestsort and the plugin loader |
+| `server/` | core (`shroudlink_server.dll`, installed as `steam_api64.dll`): hooks, inventory events, game API, mod loader with hot reload |
+| `mods/chestsort/` | chestsort as a mod (`shroudlink_mods/chestsort.dll`) |
+| `docs/sdk-v2.md` | design of the mod API |
 | `client/` | client addon (`dinput8.dll`) |
 | `sdk/` | mod SDK (C ABI + Rust trait) |
 | `examples/hello_mod/` | example mod DLL |
