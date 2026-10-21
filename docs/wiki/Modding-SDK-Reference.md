@@ -90,6 +90,12 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `position(entity)` | position in metres `[x, y (up), z]` |
 | `teleport(entity, [x, y, z])` | moves it; a player sees itself there right away |
 | `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
+| `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
+| `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
+
+`components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
+`mods/travel` is a complete example: it reads the player's `PlayerWaypoint` (the map
+marker) and teleports there.
 
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 

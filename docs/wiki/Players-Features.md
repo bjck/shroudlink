@@ -62,3 +62,9 @@ again to unlock.
 - After joining, **open any chest once**. That is how the addon learns your backpack
   layout; until then the inventory view shows no rims.
 - You can still move a locked item by hand.
+
+## Travel to your map marker (addon)
+
+Set a waypoint on the map (M, then right-click a spot), open **MODS → Travel** and click
+**Travel to the marker**. You land there right away, from anywhere, the shroud included.
+The server has to know which player you are first: open any chest once after joining.

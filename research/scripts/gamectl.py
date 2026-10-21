@@ -173,6 +173,17 @@ def turn(dx, dy=0, steps=10):
     time.sleep(0.3)
 
 
+MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x0008, 0x0010
+
+
+def right_click(x, y):
+    hover(x, y)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_RIGHTDOWN, 0, 0))))
+    time.sleep(0.08)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_RIGHTUP, 0, 0))))
+    time.sleep(0.3)
+
+
 def ctrl_click(x, y):
     """Ctrl + left click (in inventories: move between action bar and backpack)."""
     hover(x, y)
@@ -361,11 +372,19 @@ def join(timeout=240):
     raise SystemExit("the game did not reach the world in time")
 
 
+def joined_since_server_start():
+    """The local server logged an addon session after its last start (right after a server
+    restart the game still ticks for a few seconds before it notices)."""
+    lines = SERVER_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+    starts = [i for i, l in enumerate(lines) if "starting (loaded as" in l]
+    return bool(starts) and any("joined on slot" in l for l in lines[starts[-1]:])
+
+
 def ensure_in_world():
     """In the world on the local server, whatever state the game is in (else rejoin)."""
     try:
         s = Addon().state()
-        if s.get("in_world") and s["screen"] == 0x01:
+        if s.get("in_world") and s["screen"] == 0x01 and joined_since_server_start():
             return
     except OSError:
         pass

@@ -27,8 +27,29 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 pub use serde_json::{json, Value};
 pub use shroudlink::ui;
 
+mod component_types;
 mod event_types;
 pub mod events;
+
+/// Component types by name (from the game's reflection data).
+pub mod components {
+    pub use crate::component_types::COMPONENT_TYPES;
+
+    /// The descriptor id of a component type ("PlayerWaypoint" -> its hash).
+    pub fn hash_of(name: &str) -> Option<u32> {
+        COMPONENT_TYPES.iter().find(|c| c.1 == name).map(|c| c.0)
+    }
+
+    /// A `keen::WorldPosition` (three sint64, metres * 2^32) at `offset`, in metres.
+    pub fn world_position(data: &[u8], offset: usize) -> Option<[f64; 3]> {
+        let mut out = [0f64; 3];
+        for (i, v) in out.iter_mut().enumerate() {
+            let at = offset + i * 8;
+            *v = i64::from_le_bytes(data.get(at..at + 8)?.try_into().ok()?) as f64 / 4_294_967_296.0;
+        }
+        Some(out)
+    }
+}
 pub use events::{GameEvent, Known};
 
 /// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v3 mods. `HostApi`
@@ -101,6 +122,10 @@ pub struct HostApi {
     pub teleport: unsafe extern "C" fn(entity: u32, x: f64, y: f64, z: f64) -> bool,
     /// The player entity of an addon session, 0 until the addon has identified itself.
     pub player_of: unsafe extern "C" fn(client: u64) -> u32,
+    /// Copies up to `cap` bytes of an entity's component (by type hash); returns its size, 0: none.
+    pub read_component: unsafe extern "C" fn(entity: u32, type_hash: u32, out: *mut u8, cap: usize) -> usize,
+    /// Overwrites an entity's component (exact size); false if it has none.
+    pub write_component: unsafe extern "C" fn(entity: u32, type_hash: u32, data: *const u8, len: usize) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -210,6 +235,28 @@ impl World<'_> {
     /// Moves an entity to `to` (metres); a player sees itself there right away.
     pub fn teleport(&self, entity: u32, to: [f64; 3]) -> bool {
         self.available() && unsafe { (self.api.teleport)(entity, to[0], to[1], to[2]) }
+    }
+
+    /// An entity's component of the type with this name (see [`components::COMPONENT_TYPES`]),
+    /// as the game lays it out (field offsets: the game's reflection data).
+    pub fn component(&self, entity: u32, type_name: &str) -> Option<Vec<u8>> {
+        let hash = components::hash_of(type_name)?;
+        if !self.available() {
+            return None;
+        }
+        let mut out = vec![0u8; 4096];
+        let size = unsafe { (self.api.read_component)(entity, hash, out.as_mut_ptr(), out.len()) };
+        (size != 0 && size <= out.len()).then(|| {
+            out.truncate(size);
+            out
+        })
+    }
+
+    /// Overwrites an entity's component (the bytes must have its exact size). The server's
+    /// state changes at once; whether clients see it depends on the component's replication.
+    pub fn set_component(&self, entity: u32, type_name: &str, data: &[u8]) -> bool {
+        let Some(hash) = components::hash_of(type_name) else { return false };
+        self.available() && unsafe { (self.api.write_component)(entity, hash, data.as_ptr(), data.len()) }
     }
 
     /// The player entity behind an addon session. Known once the player has opened a chest
@@ -471,11 +518,17 @@ pub mod testing {
     unsafe extern "C" fn player_of(_: u64) -> u32 {
         0
     }
+    unsafe extern "C" fn read_component(_: u32, _: u32, _: *mut u8, _: usize) -> usize {
+        0
+    }
+    unsafe extern "C" fn write_component(_: u32, _: u32, _: *const u8, _: usize) -> bool {
+        false
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component },
                 sent: Box::default(),
             }
         }

@@ -139,6 +139,31 @@ pub fn teleport(entity: u32, to: [f64; 3]) -> bool {
     moved
 }
 
+/// Copies an entity's component of type `type_hash` (its `qualifiedHash`) into `out`;
+/// returns the component's size (0: the entity has none).
+pub fn read_component(entity: u32, type_hash: u32, out: &mut [u8]) -> usize {
+    world_ctx::with(|ctx| unsafe {
+        let record = events::game().entity_record(ctx, entity)?;
+        let (addr, size) = components::of(ctx, &record, type_hash)?;
+        let n = (size as usize).min(out.len());
+        std::ptr::copy_nonoverlapping(addr, out.as_mut_ptr(), n);
+        Some(size as usize)
+    })
+    .flatten()
+    .unwrap_or(0)
+}
+
+/// Overwrites an entity's component of type `type_hash`; `data` must be its exact size.
+pub fn write_component(entity: u32, type_hash: u32, data: &[u8]) -> bool {
+    world_ctx::with(|ctx| unsafe {
+        let record = events::game().entity_record(ctx, entity)?;
+        let (addr, size) = components::of(ctx, &record, type_hash)?;
+        (size as usize == data.len()).then(|| std::ptr::copy_nonoverlapping(data.as_ptr(), addr, data.len()))
+    })
+    .flatten()
+    .is_some()
+}
+
 // ---- C functions of HostApi v4 ----
 
 pub unsafe extern "C" fn api_players(out: *mut u32, cap: usize) -> usize {
@@ -159,6 +184,14 @@ pub unsafe extern "C" fn api_position(entity: u32, out: *mut f64) -> bool {
 
 pub unsafe extern "C" fn api_teleport(entity: u32, x: f64, y: f64, z: f64) -> bool {
     teleport(entity, [x, y, z])
+}
+
+pub unsafe extern "C" fn api_read_component(entity: u32, type_hash: u32, out: *mut u8, cap: usize) -> usize {
+    read_component(entity, type_hash, std::slice::from_raw_parts_mut(out, cap))
+}
+
+pub unsafe extern "C" fn api_write_component(entity: u32, type_hash: u32, data: *const u8, len: usize) -> bool {
+    write_component(entity, type_hash, std::slice::from_raw_parts(data, len))
 }
 
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {
