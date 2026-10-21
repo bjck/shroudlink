@@ -6,6 +6,7 @@
 !/.gitattributes
 !/LICENSE
 !/AGENTS.md
+!/docs/
 
 !/mod/
 /mod/target/

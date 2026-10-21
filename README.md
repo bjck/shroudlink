@@ -4,6 +4,8 @@ A mod framework for Enshrouded 1.0 dedicated servers: server mods talk to an opt
 client addon over the game's own netcode and show native in-game UI. Players without the
 addon play normally. Ships with **chestsort**, the mod it was built for.
 
+![The MODS tab added to the player menu, showing the chestsort window](docs/screenshots/mods-tab.jpg)
+
 ## chestsort
 
 **Server (`steam_api64.dll` proxy)**
@@ -17,6 +19,10 @@ addon play normally. Ships with **chestsort**, the mod it was built for.
 - MODS tab with the server's mod windows (chest categories, item search).
 - Item search in chests (`/`).
 - Lock backpack slots with `L` (gold rim): deposits never take locked items.
+
+| Find which chest an item belongs in | Locked slots (gold rim) stay in your backpack |
+|---|---|
+| ![Item search: "iron bar" belongs to Ores, with the chest names that work](docs/screenshots/item-search.jpg) | ![Backpack with locked slots marked by a gold rim](docs/screenshots/item-locks.jpg) |
 
 ## Downloads
 See the releases: `shroudlink-client.zip` (players) and `chestsort-enshrouded.zip`
