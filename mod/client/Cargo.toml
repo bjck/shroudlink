@@ -2,6 +2,7 @@
 name = "shroudlink-client"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [lib]
 # installed as dinput8.dll next to enshrouded.exe

@@ -45,6 +45,9 @@ re-applied for every build (`UPDATE-SERVER.bat`).
 patched data files are uploaded - the game deletes everything above the vanilla
 stack size. `UPDATE-SERVER.bat` does it in the safe order.
 
+## License
+MIT, see [LICENSE](LICENSE). Not affiliated with Keen Games.
+
 ## Credits
 The data mods (stacks, chest slots) are applied with **EML** by Brabb3l
 ([kfc-parser](https://github.com/Brabb3l/kfc-parser), GPL-3.0). The scripts download its

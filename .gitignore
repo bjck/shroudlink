@@ -4,6 +4,7 @@
 !/.gitignore
 !/README.md
 !/.gitattributes
+!/LICENSE
 
 !/mod/
 /mod/target/

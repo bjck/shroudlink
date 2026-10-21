@@ -5,6 +5,7 @@ members = ["client", "common", "examples/hello_mod", "link", "sdk", "server"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [workspace.dependencies]
 iced-x86 = { version = "1.21", default-features = false, features = ["std", "decoder"] }
