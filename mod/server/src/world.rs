@@ -80,7 +80,7 @@ pub fn position(entity: u32) -> Option<[f64; 3]> {
 
 /// Inventories within `radius` metres of `around` (loaded entities only): (entity,
 /// position, custom name).
-pub fn inventories_near(around: [f64; 3], radius: f64) -> Vec<(u32, [f64; 3], Option<String>)> {
+pub fn inventories_around(around: [f64; 3], radius: f64) -> Vec<(u32, [f64; 3], Option<String>)> {
     world_ctx::with(|ctx| unsafe {
         let game = events::game();
         let mut found = Vec::new();
@@ -164,6 +164,52 @@ pub fn write_component(entity: u32, type_hash: u32, data: &[u8]) -> bool {
     .is_some()
 }
 
+/// Entities with an inventory within `radius` metres of `entity` (loaded ones), players
+/// excluded.
+pub fn inventories_near(entity: u32, radius: f64) -> Vec<u32> {
+    let Some(around) = position(entity) else { return Vec::new() };
+    inventories_near_position(around, radius).into_iter().map(|(e, _, _)| e).collect()
+}
+
+fn inventories_near_position(around: [f64; 3], radius: f64) -> Vec<(u32, [f64; 3], Option<String>)> {
+    inventories_around(around, radius)
+}
+
+/// The slots of any entity's inventory: (slot id, item, count).
+pub fn inventory(entity: u32) -> Vec<(u64, u32, u32)> {
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        let Some(setup) = game.inventory_setup(ctx, entity) else { return Vec::new() };
+        let mut out = Vec::new();
+        for page in game.pages(ctx, setup).pages().iter().filter(|p| p.entity != 0) {
+            for slot in 0..crate::game::SLOTS_PER_PAGE {
+                let stack = &*page.slots.add(slot as usize);
+                out.push((crate::game::slot_id(page.entity, slot), stack.item_id, stack.count));
+            }
+        }
+        out
+    })
+    .unwrap_or_default()
+}
+
+/// Moves a stack between two inventories, outside any player action. A player's
+/// equipment, item in hand and action bar are never taken, and never filled.
+pub fn move_stack(from: u32, slot: u64, to: u32) -> u32 {
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        let mut protected = std::collections::HashSet::new();
+        if game.is_player(ctx, from) {
+            let reserved = game.player_reserved(ctx, from);
+            protected.extend(reserved.slots);
+            for page in reserved.pages.into_iter().filter(|&p| p != 0) {
+                protected.extend((0..crate::game::SLOTS_PER_PAGE).map(|s| crate::game::slot_id(page, s)));
+            }
+        }
+        crate::game_api::move_stack_in(game, ctx, from, slot, to, &protected)
+    })
+    .unwrap_or(0)
+}
+
 // ---- C functions of HostApi v4 ----
 
 pub unsafe extern "C" fn api_players(out: *mut u32, cap: usize) -> usize {
@@ -192,6 +238,24 @@ pub unsafe extern "C" fn api_read_component(entity: u32, type_hash: u32, out: *m
 
 pub unsafe extern "C" fn api_write_component(entity: u32, type_hash: u32, data: *const u8, len: usize) -> bool {
     write_component(entity, type_hash, std::slice::from_raw_parts(data, len))
+}
+
+pub unsafe extern "C" fn api_inventories_near(entity: u32, radius: f64, out: *mut u32, cap: usize) -> usize {
+    let found = inventories_near(entity, radius);
+    std::ptr::copy_nonoverlapping(found.as_ptr(), out, found.len().min(cap));
+    found.len()
+}
+
+pub unsafe extern "C" fn api_inventory(entity: u32, out: *mut shroudlink_sdk::Slot, cap: usize) -> usize {
+    let slots = inventory(entity);
+    for (i, &(id, item, count)) in slots.iter().take(cap).enumerate() {
+        *out.add(i) = shroudlink_sdk::Slot { id, item, count };
+    }
+    slots.len()
+}
+
+pub unsafe extern "C" fn api_move_stack(from: u32, slot: u64, to: u32) -> u32 {
+    move_stack(from, slot, to)
 }
 
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {

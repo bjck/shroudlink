@@ -184,17 +184,26 @@ def right_click(x, y):
     time.sleep(0.3)
 
 
-def ctrl_click(x, y):
-    """Ctrl + left click (in inventories: move between action bar and backpack)."""
+def modifier_click(x, y, vk, scan):
     hover(x, y)
-    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(0x11, 0x1D, 0, 0, 0))))
+    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(vk, scan, 0, 0, 0))))
     time.sleep(0.05)
     send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0))))
     time.sleep(0.08)
     send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0))))
     time.sleep(0.05)
-    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(0x11, 0x1D, KEYEVENTF_KEYUP, 0, 0))))
+    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(vk, scan, KEYEVENTF_KEYUP, 0, 0))))
     time.sleep(0.3)
+
+
+def ctrl_click(x, y):
+    """Ctrl + left click (in inventories: move between action bar and backpack)."""
+    modifier_click(x, y, 0x11, 0x1D)
+
+
+def shift_click(x, y):
+    """Shift + left click (chest screen: move between backpack and chest)."""
+    modifier_click(x, y, 0x10, 0x2A)
 
 
 def shot(out):

@@ -93,7 +93,13 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
 | `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
 
+| `inventories_near(entity, radius)` | entities with an inventory (chests, stations) around an entity; only the world around players is loaded |
+| `inventory(entity)` | every slot of any entity's inventory |
+| `move_stack(from, slot, to)` | moves a stack between two inventories outside any player action; a player's equipment, item in hand and action bar are never taken nor filled |
+
 `components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
+`mods/storage` shows everything in the chests around the player as one grid and fetches
+an item from all of them with one click.
 `mods/travel` is a complete example: it reads the player's `PlayerWaypoint` (the map
 marker) and teleports there.
 

@@ -178,7 +178,7 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("debug_inventories") if crate::game_events::probing() => {
                 let radius = message.get("radius").and_then(Value::as_f64).unwrap_or(30.0);
                 let player = crate::world::players().first().copied();
-                let near = player.and_then(crate::world::position).map(|p| crate::world::inventories_near(p, radius)).unwrap_or_default();
+                let near = player.and_then(crate::world::position).map(|p| crate::world::inventories_around(p, radius)).unwrap_or_default();
                 let list: Vec<Value> = near.iter().map(|(e, p, n)| json!({ "entity": e, "position": p, "name": n })).collect();
                 log!("debug_inventories: {}", Value::Array(list));
             }

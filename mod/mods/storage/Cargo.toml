@@ -1,0 +1,12 @@
+[package]
+name = "storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# shroudlink_mods/storage.dll next to the server
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+shroudlink-sdk = { path = "../../sdk" }

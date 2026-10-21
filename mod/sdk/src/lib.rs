@@ -126,6 +126,12 @@ pub struct HostApi {
     pub read_component: unsafe extern "C" fn(entity: u32, type_hash: u32, out: *mut u8, cap: usize) -> usize,
     /// Overwrites an entity's component (exact size); false if it has none.
     pub write_component: unsafe extern "C" fn(entity: u32, type_hash: u32, data: *const u8, len: usize) -> bool,
+    /// Writes up to `cap` entities with an inventory within `radius` metres of `entity`.
+    pub inventories_near: unsafe extern "C" fn(entity: u32, radius: f64, out: *mut u32, cap: usize) -> usize,
+    /// Writes up to `cap` slots of any entity's inventory; returns how many it has.
+    pub inventory: unsafe extern "C" fn(entity: u32, out: *mut Slot, cap: usize) -> usize,
+    /// Moves a stack between two inventories; returns the items moved.
+    pub move_stack_between: unsafe extern "C" fn(from: u32, slot: u64, to: u32) -> u32,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -257,6 +263,38 @@ impl World<'_> {
     pub fn set_component(&self, entity: u32, type_name: &str, data: &[u8]) -> bool {
         let Some(hash) = components::hash_of(type_name) else { return false };
         self.available() && unsafe { (self.api.write_component)(entity, hash, data.as_ptr(), data.len()) }
+    }
+
+    /// Entities with an inventory (chests, stations …) within `radius` metres of `entity`.
+    /// The server only keeps the world around players loaded.
+    pub fn inventories_near(&self, entity: u32, radius: f64) -> Vec<u32> {
+        if !self.available() {
+            return Vec::new();
+        }
+        let mut out = vec![0u32; 1024];
+        let n = unsafe { (self.api.inventories_near)(entity, radius, out.as_mut_ptr(), out.len()) };
+        out.truncate(n.min(1024));
+        out
+    }
+
+    /// Every slot of any entity's inventory.
+    pub fn inventory(&self, entity: u32) -> Vec<Slot> {
+        if !self.available() {
+            return Vec::new();
+        }
+        let mut out = vec![Slot::default(); 512];
+        let n = unsafe { (self.api.inventory)(entity, out.as_mut_ptr(), out.len()) };
+        out.truncate(n.min(512));
+        out
+    }
+
+    /// Moves the stack in `slot` of `from`'s inventory into `to`'s (partial stacks first).
+    /// A player's equipment, item in hand and action bar are never taken nor filled.
+    pub fn move_stack(&self, from: u32, slot: u64, to: u32) -> u32 {
+        if !self.available() {
+            return 0;
+        }
+        unsafe { (self.api.move_stack_between)(from, slot, to) }
     }
 
     /// The player entity behind an addon session. Known once the player has opened a chest
@@ -524,11 +562,20 @@ pub mod testing {
     unsafe extern "C" fn write_component(_: u32, _: u32, _: *const u8, _: usize) -> bool {
         false
     }
+    unsafe extern "C" fn inventories_near(_: u32, _: f64, _: *mut u32, _: usize) -> usize {
+        0
+    }
+    unsafe extern "C" fn inventory(_: u32, _: *mut Slot, _: usize) -> usize {
+        0
+    }
+    unsafe extern "C" fn move_stack_between(_: u32, _: u64, _: u32) -> u32 {
+        0
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between },
                 sent: Box::default(),
             }
         }

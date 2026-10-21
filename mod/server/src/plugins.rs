@@ -54,6 +54,9 @@ static API: HostApi = HostApi {
     player_of: crate::world::api_player_of,
     read_component: crate::world::api_read_component,
     write_component: crate::world::api_write_component,
+    inventories_near: crate::world::api_inventories_near,
+    inventory: crate::world::api_inventory,
+    move_stack_between: crate::world::api_move_stack,
 };
 
 enum Decl {

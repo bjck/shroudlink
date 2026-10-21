@@ -68,3 +68,9 @@ again to unlock.
 Set a waypoint on the map (M, then right-click a spot), open **MODS → Travel** and click
 **Travel to the marker**. You land there right away, from anywhere, the shroud included.
 The server has to know which player you are first: open any chest once after joining.
+
+## Storage: all chests as one box (addon)
+
+**MODS → Storage** shows everything stored in the chests within 40 m of you as one grid,
+largest stacks first. Click an item to take all of it from every chest into your
+backpack. If the backpack is full, you get as much as fits.

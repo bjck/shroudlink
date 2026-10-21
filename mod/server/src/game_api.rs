@@ -57,25 +57,34 @@ pub unsafe extern "C" fn max_stack(game: *mut c_void, item: u32) -> u32 {
 /// accepts (partial stacks of the same item first, then empty slots).
 pub unsafe extern "C" fn move_stack(game: *mut c_void, slot: u64, to: u32) -> u32 {
     let Some(ev) = current(game) else { return 0 };
-    let g = events::game();
-    if ev.protected.contains(&slot) || g.deposit_disabled(ev.ctx) {
+    move_stack_in(events::game(), ev.ctx, ev.event.from, slot, to, &ev.protected)
+}
+
+/// Moves the stack in `slot` of `from`'s inventory into `to`'s. Never takes `protected`
+/// slots, and never fills a player's action bar.
+pub(crate) unsafe fn move_stack_in(g: &Game, ctx: *mut Ctx, from: u32, slot: u64, to: u32, protected: &std::collections::HashSet<u64>) -> u32 {
+    if protected.contains(&slot) || g.deposit_disabled(ctx) {
         return 0;
     }
-    let (Some(from_setup), Some(to_setup)) = (g.inventory_setup(ev.ctx, ev.event.from), g.inventory_setup(ev.ctx, to)) else { return 0 };
-    let from_pages = g.pages(ev.ctx, from_setup);
+    let (Some(from_setup), Some(to_setup)) = (g.inventory_setup(ctx, from), g.inventory_setup(ctx, to)) else { return 0 };
+    let from_pages = g.pages(ctx, from_setup);
     let (page, index) = (slot as u32, (slot >> 32) as u8);
     let Some(page) = from_pages.pages().iter().find(|p| p.entity == page && p.entity != 0) else { return 0 };
     if index >= SLOTS_PER_PAGE {
         return 0;
     }
     let stack = &*page.slots.add(index as usize);
-    let Some(info) = g.item_info(ev.ctx, stack.item_id) else { return 0 };
-    let to_pages = g.pages(ev.ctx, to_setup);
+    if stack.count == 0 {
+        return 0;
+    }
+    let Some(info) = g.item_info(ctx, stack.item_id) else { return 0 };
+    let skip = if g.is_player(ctx, to) { g.player_reserved(ctx, to).pages } else { [0, 0] };
+    let to_pages: Vec<Page> = g.pages(ctx, to_setup).pages().iter().copied().filter(|p| p.entity != 0 && !skip.contains(&p.entity)).collect();
     let mut moved = 0;
     // keep going until the stack is empty or the target has no room
     while stack.count != 0 {
-        let Some(dst) = find_destination(to_pages.pages(), stack.item_id, info.max_stack as u32) else { break };
-        let result = g.transfer(ev.ctx, dst, slot);
+        let Some(dst) = find_destination(&to_pages, stack.item_id, info.max_stack as u32) else { break };
+        let result = g.transfer(ctx, dst, slot);
         if result.error != 0 || result.moved == 0 {
             break;
         }
