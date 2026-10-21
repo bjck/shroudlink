@@ -157,6 +157,19 @@ fn handle(message: &Value) {
             ui.menu.retain(|(o, _)| *o != owner);
             ui.menu.extend(entries.into_iter().map(|e| (owner.clone(), e)));
         }
+        // inventory building blocks: the slot module keeps them (its own lock)
+        ToClient::SlotKeys { owner, keys } => {
+            drop(ui);
+            crate::slots::set_keys(owner, keys);
+        }
+        ToClient::Marks { owner, marks } => {
+            drop(ui);
+            crate::slots::set_marks(owner, marks);
+        }
+        ToClient::Store { owner, data } => {
+            drop(ui);
+            crate::slots::store(&owner, data);
+        }
     }
 }
 
@@ -229,8 +242,8 @@ pub fn draw(api: &Api) {
         // the chest screen embeds the item search in its backpack panel (after_panel_header)
         let search = !page && CHEST_SCREENS.contains(&screen);
         crate::input::arm_search_hotkey(search);
-        // L locks backpack slots on any menu screen (not while playing, not on the MODS page)
-        crate::input::arm_lock_key(!page && screen != SCREEN_GAMEPLAY);
+        // slot keys (chestsort's L) act on any menu screen (not while playing, not on the MODS page)
+        crate::input::allow_slot_keys(!page && screen != SCREEN_GAMEPLAY);
         // the search term stays across chests (looking for something means opening many)
         SEARCH_ACTIVE.store(search, Ordering::Relaxed);
         if !page && !search && FOCUS.swap(0, Ordering::Relaxed) != 0 {
@@ -248,7 +261,7 @@ pub fn draw(api: &Api) {
         }
     }
     // an L press is meant for the slot under the cursor in the frame it happened
-    crate::input::clear_lock_key();
+    crate::input::clear_slot_key();
     for (owner, event) in pending.events {
         log!("ui: event {owner}/{}/{} {:?}", event.window, event.node, event.event);
         crate::link::send(event.to_message(&owner));

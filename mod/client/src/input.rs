@@ -5,7 +5,7 @@
 //! from the game (otherwise typing "j" would switch to the journal tab).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use chestsort_common::log;
@@ -31,30 +31,36 @@ static FOCUSED: AtomicBool = AtomicBool::new(false);
 static SEARCH_HOTKEY: AtomicBool = AtomicBool::new(false);
 static SEARCH_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// "L" press for the hovered backpack slot: 0 none, 1 pressed, 2 pressed and one UI
-/// frame has ended since. A press can arrive between the slots being drawn and the
-/// end of the frame, so it stays valid through the whole next frame.
-static LOCK_KEY: AtomicU8 = AtomicU8::new(0);
+/// Letters mods registered as slot keys (bit 0 = A).
+static SLOT_KEYS: AtomicU32 = AtomicU32::new(0);
+/// Set on menu screens, where slot keys act on the hovered backpack slot.
+static SLOT_KEYS_ALLOWED: AtomicBool = AtomicBool::new(false);
+/// A slot key press waiting for the hovered slot: the letter, plus 0x100 once one UI frame
+/// has ended since. A press can arrive between the slots being drawn and the end of the
+/// frame, so it stays valid through the whole next frame. 0 = none.
+static PENDING_KEY: AtomicU32 = AtomicU32::new(0);
 
-/// True (once) if L was pressed while the cursor is inside `rect` (x, y, w, h, UI units).
-pub fn lock_key_pressed_over(rect: [f32; 4], (x, y): (f32, f32)) -> bool {
-    if LOCK_KEY.load(Ordering::Relaxed) == 0 {
-        return false;
+pub fn arm_slot_keys(mask: u32) {
+    SLOT_KEYS.store(mask, Ordering::Relaxed);
+}
+
+pub fn allow_slot_keys(allowed: bool) {
+    SLOT_KEYS_ALLOWED.store(allowed, Ordering::Relaxed);
+}
+
+/// The slot key pressed (once) while the cursor is inside `rect` (x, y, w, h, UI units).
+pub fn slot_key_pressed_over(rect: [f32; 4], (x, y): (f32, f32)) -> Option<char> {
+    let pending = PENDING_KEY.load(Ordering::Relaxed);
+    if pending == 0 {
+        return None;
     }
     let inside = x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3];
-    inside && LOCK_KEY.swap(0, Ordering::Relaxed) != 0
+    (inside && PENDING_KEY.swap(0, Ordering::Relaxed) != 0).then(|| (pending & 0xff) as u8 as char)
 }
 
-/// End of a UI frame: forgets an L press that a whole frame of slots did not take.
-pub fn clear_lock_key() {
-    let _ = LOCK_KEY.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |s| Some(if s == 1 { 2 } else { 0 }));
-}
-
-/// Set on menu screens, where L can lock the hovered backpack slot.
-static LOCK_ARMED: AtomicBool = AtomicBool::new(false);
-
-pub fn arm_lock_key(armed: bool) {
-    LOCK_ARMED.store(armed, Ordering::Relaxed);
+/// End of a UI frame: forgets a slot key press that a whole frame of slots did not take.
+pub fn clear_slot_key() {
+    let _ = PENDING_KEY.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |p| Some(if p != 0 && p & 0x100 == 0 { p | 0x100 } else { 0 }));
 }
 
 /// Enables the "/" hotkey for the frame's search field.
@@ -88,9 +94,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         SEARCH_REQUESTED.store(true, Ordering::Relaxed);
         return 0;
     }
-    if !FOCUSED.load(Ordering::Relaxed) && LOCK_ARMED.load(Ordering::Relaxed) && msg == WM_KEYDOWN && wparam == b'L' as usize && lparam & (1 << 30) == 0 {
-        // a fresh press (not auto-repeat); the slot under the cursor takes it this frame
-        LOCK_KEY.store(1, Ordering::Relaxed);
+    let letter = (b'A' as usize..=b'Z' as usize).contains(&wparam).then(|| wparam as u32 - b'A' as u32);
+    if let Some(bit) = letter.filter(|&b| SLOT_KEYS.load(Ordering::Relaxed) & 1 << b != 0) {
+        if !FOCUSED.load(Ordering::Relaxed) && SLOT_KEYS_ALLOWED.load(Ordering::Relaxed) && msg == WM_KEYDOWN && lparam & (1 << 30) == 0 {
+            // a fresh press (not auto-repeat); the slot under the cursor takes it
+            PENDING_KEY.store(b'A' as u32 + bit, Ordering::Relaxed);
+        }
     }
     if FOCUSED.load(Ordering::Relaxed) {
         match msg {

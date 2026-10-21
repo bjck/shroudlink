@@ -8,6 +8,15 @@
 //!                   `{"mod":"ui","op":"close","owner":"chestsort","id":"search"}`
 //!                   `{"mod":"ui","op":"entries","owner":"chestsort","entries":[...]}`
 //! client -> server  `{"mod":"chestsort","op":"ui_event","window":"search","node":"query","event":{...}}`
+//!
+//! Inventory building blocks (the addon draws and stores, the mod decides):
+//!
+//! server -> client  `{"mod":"ui","op":"slot_keys","owner":"chestsort","keys":[{"key":"L","label":"Lock"}]}`
+//!                   `{"mod":"ui","op":"marks","owner":"chestsort","marks":[{"slots":[...],"style":"rim"}]}`
+//!                   `{"mod":"ui","op":"store","owner":"chestsort","data":{...}}`
+//! client -> server  `{"mod":"chestsort","op":"slot_key","key":"L","slot":..,"position":[page,index],"item":..}`
+//!                   `{"mod":"chestsort","op":"stored","data":{...}}`   after the welcome, if stored
+//!                   `{"mod":"chestsort","op":"layout","pages":[...]}`  backpack page entities in display order
 
 use serde::{Deserialize, Serialize};
 
@@ -49,12 +58,70 @@ pub struct MenuEntry {
     pub label: String,
 }
 
+/// A key that acts on the backpack slot under the cursor (menu screens only).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct SlotKey {
+    /// one letter, A-Z
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkStyle {
+    /// a gold rim around the slot
+    Rim,
+    /// drawn faded
+    Dim,
+}
+
+/// How to draw a set of inventory slots (slot ids: `page entity | index << 32`).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Mark {
+    pub slots: Vec<u64>,
+    pub style: MarkStyle,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ToClient {
     Open { owner: String, window: Window },
     Close { owner: String, id: String },
     Entries { owner: String, entries: Vec<MenuEntry> },
+    /// Replaces the owner's slot hotkeys.
+    SlotKeys { owner: String, keys: Vec<SlotKey> },
+    /// Replaces the owner's slot marks.
+    Marks { owner: String, marks: Vec<Mark> },
+    /// Keeps `data` on the player's PC for this server; it comes back as `stored` on every join.
+    Store { owner: String, data: serde_json::Value },
+}
+
+/// A message the addon sends to a mod about inventory slots.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum FromClient {
+    /// A registered key over a backpack slot. `position` is (page in display order, index)
+    /// and stays valid across sessions, unlike the slot id.
+    SlotKey { key: String, slot: u64, position: (u32, u32), item: u32 },
+    /// What the mod stored on this player's PC for this server.
+    Stored { data: serde_json::Value },
+    /// The backpack's page entities in display order (positions map to slot ids through it).
+    Layout { pages: Vec<u32> },
+}
+
+impl FromClient {
+    pub fn to_message(&self, owner: &str) -> serde_json::Value {
+        let mut v = serde_json::to_value(self).expect("slot messages serialise");
+        v["mod"] = owner.into();
+        v
+    }
+
+    /// The slot message in a mod's incoming `message`, if it is one.
+    pub fn from_message(message: &serde_json::Value) -> Option<FromClient> {
+        let mut m = message.clone();
+        m.as_object_mut()?.remove("mod");
+        serde_json::from_value(m).ok()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -119,6 +186,21 @@ mod tests {
         let mut back = msg.clone();
         back.as_object_mut().unwrap().remove("mod");
         assert_eq!(serde_json::from_value::<ToClient>(back).unwrap(), open);
+    }
+
+    #[test]
+    fn slot_building_blocks_json_shape() {
+        let marks = ToClient::Marks { owner: "chestsort".into(), marks: vec![Mark { slots: vec![6672 | 6 << 32], style: MarkStyle::Rim }] };
+        let msg = marks.to_message();
+        assert_eq!(msg["op"], "marks");
+        assert_eq!(msg["marks"][0]["style"], "rim");
+        let key = FromClient::SlotKey { key: "L".into(), slot: 6672 | 6 << 32, position: (5, 6), item: 42 };
+        let msg = key.to_message("chestsort");
+        assert_eq!(msg["mod"], "chestsort");
+        assert_eq!(msg["op"], "slot_key");
+        assert_eq!(msg["position"], serde_json::json!([5, 6]));
+        assert_eq!(FromClient::from_message(&msg), Some(key));
+        assert_eq!(FromClient::from_message(&serde_json::json!({ "mod": "x", "op": "ui_event" })), None);
     }
 
     #[test]

@@ -38,6 +38,14 @@ A mod can:
   `keep` names slots that must stay, `on_transfer` moves stacks itself through `Game`
   (`slots`, `is_player`, `chest_name`, `max_stack`, `move_stack`, `send`).
 
+- work with the player's backpack slots through the addon's **building blocks**
+  (`shroudlink::ui`): `SlotKeys` (a letter that acts on the hovered slot → `FromClient::SlotKey`
+  with slot id and a session-independent position), `Marks` (rim or dimmed slots), `Store`
+  (JSON kept on the player's PC per server → `FromClient::Stored` on every join) and
+  `FromClient::Layout` (page order, to map stored positions to this session's slot ids).
+  The addon never needs an update for a new feature built from them; chestsort's locks are
+  one (`mods/chestsort/src/locks.rs`, about 100 lines).
+
 Equipped items, the item in hand and the actionbar are always protected by the core.
 `mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).
 
@@ -129,6 +137,8 @@ left, the selected mod's windows on the right. Windows opened while another scre
 cursor is shown (e.g. a chest) appear as panels on the right.
 
 ## Built-in client features
+- **Slot building blocks** (above): keys, marks, storage (`shroudlink_store.json` next to the
+  game, per server and mod) and the backpack layout.
 - **Item search on the chest screen:** "SEARCH ( / )" in the backpack panel header. Click it
   or press `/`, type: slots of both panels whose (localised) item name does not match turn
   grey while typing. `Esc` clears, a second `Esc` leaves the field, `X` clears.

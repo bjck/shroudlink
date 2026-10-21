@@ -83,6 +83,19 @@ fn with_mods<R>(f: impl FnOnce(&mut Vec<Box<dyn ServerMod>>) -> R) -> R {
     f(&mut MODS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Identifies this server to addons, which keep mod data per server: the server name
+/// from `enshrouded_server.json`.
+fn server_id() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        std::fs::read_to_string(chestsort_common::game_dir().join("enshrouded_server.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v.get("name")?.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "server".into())
+    })
+}
+
 /// Ids of the registered mods.
 pub(crate) fn ids() -> Vec<String> {
     with_mods(|mods| mods.iter().map(|m| m.id().to_owned()).collect())
@@ -91,7 +104,7 @@ pub(crate) fn ids() -> Vec<String> {
 pub(crate) fn join(host: &mut Host, client: ClientId) {
     with_mods(|mods| {
         let list: Vec<Value> = mods.iter().map(|m| m.describe()).collect();
-        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list }));
+        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id() }));
         for m in mods.iter_mut() {
             m.on_join(host, client);
         }

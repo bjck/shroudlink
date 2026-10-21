@@ -32,17 +32,13 @@ impl Mod for Chestsort {
 
     fn on_join(&mut self, host: &mut Host, client: u64) {
         self.ui.on_join(host, client);
+        self.locks.on_join(host, client);
     }
 
     fn on_message(&mut self, host: &mut Host, client: u64, message: &Value) {
-        // the addon's locked inventory slots (`entity | slot << 32`) for this session
-        if message.get("op").and_then(Value::as_str) == Some("locks") {
-            let slots: HashSet<u64> = message.get("slots").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
-            log!("chestsort: client {client:016x} locked {} slot(s)", slots.len());
-            self.locks.set(client, slots);
-            return;
+        if !self.locks.on_message(host, client, message) {
+            self.ui.on_message(host, client, message);
         }
-        self.ui.on_message(host, client, message);
     }
 
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
@@ -131,13 +127,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn locks_message_is_stored_per_client() {
-        let mut m = Chestsort::default();
-        let mut host = MockHost::default();
-        m.on_message(&mut host.host(), 9, &shroudlink_sdk::json!({ "mod": ID, "op": "locks", "slots": [6672u64 | 6 << 32] }));
-        assert!(m.locks.any());
-        m.on_leave(&mut host.host(), 9);
-        assert!(!m.locks.any());
-    }
 }

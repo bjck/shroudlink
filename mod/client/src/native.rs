@@ -502,29 +502,30 @@ unsafe extern "system" fn item_slot_hook(out: *mut u8, desc: *mut u8, compare: *
     let api = API.get().unwrap();
     let slot = *(desc as *const *const u8);
     let item = if slot.is_null() { 0 } else { *(slot.add(8) as *const u32) };
-    // the player's backpack slots can be locked (L while hovering); the chest screen's
-    // backpack panel tells where each page sits, other views look that up
-    let id = if slot.is_null() { 0 } else { crate::locks::slot_id(*(slot as *const u64)) };
+    // the player's backpack slots: mods mark them and act on them with slot keys; the chest
+    // screen's backpack panel tells where each page sits, other views look that up
+    let id = if slot.is_null() { 0 } else { crate::slots::slot_id(*(slot as *const u64)) };
     let position = if id & 0xffff_ffff == 0 {
         None
     } else if BACKPACK_SLOTS.load(std::sync::atomic::Ordering::Relaxed) {
-        Some(crate::locks::observe(id))
+        Some(crate::slots::observe(id))
     } else {
-        crate::locks::position_of(id)
+        crate::slots::position_of(id)
     };
-    let locked = position.is_some_and(crate::locks::is_locked);
-    let slot_id = position.map_or(0, |(page, index)| (page as u64) << 8 | index as u64);
+    let mark = position.and_then(|_| crate::slots::mark_of(id));
+    let rim_key = position.map_or(0, |(page, index)| (page as u64) << 8 | index as u64);
     let dim = item != 0
         && crate::ui::with_search(|query| api.item_name(item).is_some_and(|name| !query.split_whitespace().all(|w| name.contains(w))))
             .unwrap_or(false);
     // the render parameters are built inside doItemSlot (slot_render_hook)
+    let dim = dim || mark == Some(shroudlink::ui::MarkStyle::Dim);
     SLOT_TINT.store(if dim { DIMMED_TINT } else { 0 }, std::sync::atomic::Ordering::Relaxed);
-    let r = if locked {
-        // locked: the slot sits in a gold-rimmed frame of its own size, shrunk by the rim
+    let r = if mark == Some(shroudlink::ui::MarkStyle::Rim) {
+        // rim: the slot sits in a gold-rimmed frame of its own size, shrunk by the rim
         let size_ptr = desc.add(0x6c) as *mut f32;
         let size = *size_ptr;
         let mut rim = Frame::new();
-        api.open_column(&mut rim, &UiStr::keyed("shroudlinkLockRim", slot_id), 0.0);
+        api.open_column(&mut rim, &UiStr::keyed("shroudlinkLockRim", rim_key), 0.0);
         api.set_size(&rim, size, size);
         api.set_padding(&rim, [LOCK_RIM; 4]);
         api.background(&mut rim, LOCK_RIM_STYLE, 1.0);
@@ -538,8 +539,8 @@ unsafe extern "system" fn item_slot_hook(out: *mut u8, desc: *mut u8, compare: *
     };
     SLOT_TINT.store(0, std::sync::atomic::Ordering::Relaxed);
     if let Some(position) = position {
-        if crate::input::lock_key_pressed_over(*(out as *const [f32; 4]), mouse_pos()) {
-            crate::locks::toggle(position);
+        if let Some(key) = crate::input::slot_key_pressed_over(*(out as *const [f32; 4]), mouse_pos()) {
+            crate::slots::key_pressed(key, id, position, item);
         }
     }
     r
@@ -558,7 +559,7 @@ unsafe extern "system" fn panel_header_hook(panel: *mut c_void, index: u8, extra
     IN_BACKPACK_PANEL.store(false, std::sync::atomic::Ordering::Relaxed);
     BACKPACK_SLOTS.store(false, std::sync::atomic::Ordering::Relaxed);
     if index == 0 {
-        crate::locks::panel_done();
+        crate::slots::panel_done();
     }
     // still inside the panel's frame: whatever we open now becomes part of the panel layout
     crate::ui::after_panel_header(api, index);

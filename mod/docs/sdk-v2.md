@@ -1,8 +1,9 @@
 # shroudlink SDK v2: server events and game API
 
-Status: phase 1 of the meta framework (server side). Phase 2 adds generic client
-building blocks (slot decorations, slot hotkeys, panel sections); phase 3 a hook
-registry with a per-build self-test.
+Status: phase 1 (server events and game API) and phase 2 (client building blocks: slot
+keys, slot marks, per-server storage, backpack layout; see `link/src/ui.rs`) are done.
+Next: panel sections and notifications on the client, and a hook registry so features
+switch off individually when a game update breaks one hook.
 
 ## Goal
 

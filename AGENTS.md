@@ -74,8 +74,14 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
 ## Facts that are easy to get wrong
 
 - **Client and server share ECS entity ids** within a session, but ids change between
-  sessions. A slot id is `entity | slot_index << 32`. Persist positions, not ids
-  (see `client/src/locks.rs`).
+  sessions. A slot id is `entity | slot_index << 32`. Persist positions, not ids: the
+  addon reports the backpack `layout` and positions with every slot key (`client/src/slots.rs`,
+  `mods/chestsort/src/locks.rs`).
+- The addon is generic: features are server-mod logic on its building blocks (slot keys,
+  marks, store, layout, windows). Add a client building block only when no mod can express
+  the feature with the existing ones; the item search is the one client-only feature.
+- A new addon with an old server (or the reverse) must keep working: chestsort still accepts
+  the old addon's `"op":"locks"` message.
 - `FUN_1401ad1c0(out, ctx, to, from, feedback)` (quick stack) runs in **both
   directions**: chest → player too. Mods get `InventoryEvent { from, to }` and must check
   `game.is_player(from)`. The R button ("move all") is `FUN_1401ad940(out, ctx, from, to, ..)`.

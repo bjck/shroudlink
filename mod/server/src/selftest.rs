@@ -199,6 +199,10 @@ unsafe fn run(descriptor: &[u8]) {
         },
     );
     report.check(
+        "slot key offered",
+        if welcome.iter().any(|m| m["op"] == "slot_keys" && m["keys"][0]["key"] == "L") { Ok("chestsort registers L".into()) } else { Err("no slot_keys from chestsort".into()) },
+    );
+    report.check(
         "MODS menu entry",
         if welcome.iter().any(|m| m["op"] == "entries" && m["owner"] == "chestsort") { Ok("chestsort offers its menu".into()) } else { Err("no chestsort entries".into()) },
     );
@@ -296,7 +300,20 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
         report.skip("inventory events", "could not set up test stacks");
         return;
     };
-    send(json!({ "mod": "chestsort", "op": "locks", "slots": [locked] }));
+    // the addon reports the backpack layout and presses L over the first test stack
+    let mut pages: Vec<u32> = Vec::new();
+    for (slot, ..) in slots(game, ctx, player) {
+        if !pages.contains(&(slot as u32)) {
+            pages.push(slot as u32);
+        }
+    }
+    let position = [pages.iter().position(|&p| p == locked as u32).unwrap_or(0) as u32, (locked >> 32) as u32];
+    send(json!({ "mod": "chestsort", "op": "layout", "pages": pages }));
+    let reply = send(json!({ "mod": "chestsort", "op": "slot_key", "key": "L", "slot": locked, "position": position, "item": ore }));
+    let stored = reply.iter().find(|m| m["op"] == "store").map(|m| m["data"]["locked"].clone());
+    let marked = reply.iter().rev().find(|m| m["op"] == "marks").map(|m| m["marks"][0]["slots"].clone());
+    report.check("L stores the lock on the PC", if stored == Some(json!([position])) { Ok(format!("stored position {position:?}")) } else { Err(format!("store message: {stored:?}")) });
+    report.check("L marks the slot", if marked == Some(json!([locked])) { Ok("rim on the locked slot".into()) } else { Err(format!("marks message: {marked:?}")) });
     let locked_intact = |game: &Game| slots(game, ctx, player).iter().any(|s| *s == (locked, ore, 5));
 
     let mut out: DepositResult = std::mem::zeroed();
@@ -314,7 +331,9 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     report.check("move all moves the rest", if count(&c, fibre) == 3 { Ok("plant fibre went into the chest".into()) } else { Err(format!("chest holds {} plant fibre, expected 3", count(&c, fibre))) });
     report.check("move all keeps locked slot", if locked_intact(game) { Ok("5 locked iron bars stayed".into()) } else { Err("the locked stack changed".into()) });
 
-    send(json!({ "mod": "chestsort", "op": "locks", "slots": [] }));
+    let reply = send(json!({ "mod": "chestsort", "op": "slot_key", "key": "L", "slot": locked, "position": position, "item": ore }));
+    let cleared = reply.iter().rev().find(|m| m["op"] == "marks").map(|m| m["marks"][0]["slots"].clone());
+    report.check("L again unlocks", if cleared == Some(json!([])) { Ok("rim removed".into()) } else { Err(format!("marks message: {cleared:?}")) });
     FAKE_PLAYER.store(0, Ordering::SeqCst);
     *FAKE_NAME.lock().unwrap() = None;
 }

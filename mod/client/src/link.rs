@@ -159,9 +159,9 @@ fn dispatch(message: &Value) {
             Some("welcome") => {
                 let mods = message.get("mods").and_then(Value::as_array).cloned().unwrap_or_default();
                 log!("shroudlink: connected, server mods: {}", Value::Array(mods.clone()));
-                with_link(|link| link.server_mods = mods);
+                with_link(|link| link.server_mods = mods.clone());
                 send(json!({ "mod": "shroudlink", "op": "ping", "echo": "hello from the client addon" }));
-                crate::locks::send();
+                crate::slots::on_welcome(message.get("server").and_then(Value::as_str).unwrap_or("server"), &mods);
             }
             Some("pong") => log!("shroudlink: pong {}", message.get("echo").unwrap_or(&Value::Null)),
             _ => {}
