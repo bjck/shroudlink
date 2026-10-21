@@ -1,0 +1,6 @@
+{
+    "id": "lantern_dump",
+    "name": "lantern dump",
+    "version": "0.1.0",
+    "capabilities": ["export"]
+}
