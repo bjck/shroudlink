@@ -87,24 +87,27 @@ impl Tally {
     pub fn hit(&mut self, now: f64, hit: &Hit, is_player: impl Fn(u32) -> bool) {
         let source_is_player = hit.source != 0 && is_player(hit.source);
         let target_is_player = is_player(hit.target);
+        // Healing received counts everything that refills health (regeneration, potions,
+        // other players); healing done only what a player gives others. Heals neither start
+        // nor extend a fight: regeneration ticks every two seconds.
         if hit.healing {
-            if source_is_player {
-                self.add(hit.source, now, |t| t.healing += hit.amount as u64);
+            if source_is_player && hit.source != hit.target {
+                self.add(hit.source, now, false, |t| t.healing += hit.amount as u64);
             }
             if target_is_player {
-                self.add(hit.target, now, |t| t.healed += hit.amount as u64);
+                self.add(hit.target, now, false, |t| t.healed += hit.amount as u64);
             }
             return;
         }
         // damage dealt counts against anything but players (no friendly fire)
         if source_is_player && !target_is_player && hit.amount > 0 {
-            self.add(hit.source, now, |t| {
+            self.add(hit.source, now, true, |t| {
                 t.damage += hit.amount as u64;
                 t.top_hit = t.top_hit.max(hit.amount);
             });
         }
         if target_is_player {
-            self.add(hit.target, now, |t| t.taken += hit.amount as u64);
+            self.add(hit.target, now, true, |t| t.taken += hit.amount as u64);
             let p = self.players.entry(hit.target).or_default();
             // blocked hits (0 damage) say nothing about the death
             if hit.amount > 0 || hit.killing_blow {
@@ -131,12 +134,20 @@ impl Tally {
         p.deaths.truncate(DEATHS_KEPT);
     }
 
-    fn add(&mut self, player: u32, now: f64, f: impl Fn(&mut Totals)) {
+    /// Adds to the session and, for combat (`fighting`), to the current fight, starting
+    /// one if needed; anything else only joins a fight that is going on.
+    fn add(&mut self, player: u32, now: f64, fighting: bool, f: impl Fn(&mut Totals)) {
         let p = self.players.entry(player).or_default();
         f(&mut p.session);
-        let fight = p.fight.get_or_insert(Fight { start: now, last: now, totals: Totals::default() });
-        f(&mut fight.totals);
-        fight.last = now;
+        if fighting && p.fight.is_none() {
+            p.fight = Some(Fight { start: now, last: now, totals: Totals::default() });
+        }
+        if let Some(fight) = p.fight.as_mut() {
+            f(&mut fight.totals);
+            if fighting {
+                fight.last = now;
+            }
+        }
     }
 
     /// Fights that are over (no hit for [`FIGHT_GAP`]), per player.
@@ -211,10 +222,22 @@ mod tests {
         assert_eq!(*id, PLAYER);
         assert_eq!(fight.totals, Totals { damage: 250, taken: 30, healing: 0, healed: 20, top_hit: 150 });
         assert_eq!(fight.dps(), 50.0);
-        let friend = &done.iter().find(|(id, _)| *id == FRIEND).unwrap().1;
-        assert_eq!(friend.totals.healing, 20);
+        // the healer was not fighting: the heal counts for their session only
+        assert!(done.iter().all(|(id, _)| *id != FRIEND));
+        assert_eq!(t.table().iter().find(|r| r.0 == FRIEND).unwrap().1.healing, 20);
         assert!(t.finished(30.0).is_empty(), "reported once");
         assert_eq!(t.table()[0].0, PLAYER);
+    }
+
+    #[test]
+    fn regeneration_is_healing_received_but_no_fight() {
+        let mut t = Tally::default();
+        let regen = Hit { healing: true, ..hit(PLAYER, PLAYER, 13) };
+        t.hit(0.0, &regen, players);
+        t.hit(2.0, &regen, players);
+        assert!(t.finished(100.0).is_empty(), "no fight from regeneration");
+        let rows = t.table();
+        assert_eq!(rows[0].1, Totals { healed: 26, ..Totals::default() });
     }
 
     #[test]

@@ -229,7 +229,7 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
                 let name = message.get("type").and_then(Value::as_str).unwrap_or("");
                 let max = message.get("max").and_then(Value::as_u64).unwrap_or(20000) as u32;
                 let found = shroudlink_sdk::components::hash_of(name).map(|h| crate::world::scan_component(h, max)).unwrap_or_default();
-                let list: Vec<Value> = found.iter().map(|(e, b)| json!({ "entity": e, "u32": b.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect::<Vec<_>>() })).collect();
+                let list: Vec<Value> = found.iter().map(|(e, b)| json!({ "entity": e, "position": crate::world::position(*e), "u32": b.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect::<Vec<_>>() })).collect();
                 log!("debug_scan: {}", json!({ "type": name, "found": list }));
             }
             Some("debug_face") if crate::game_events::probing() => {

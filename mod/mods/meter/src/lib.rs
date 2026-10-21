@@ -171,7 +171,8 @@ fn describe_death(death: &Death, now: f64) -> String {
     let ago = (now - death.at).max(0.0);
     let when = if ago < 90.0 { format!("{ago:.0} s ago") } else { format!("{:.0} min ago", ago / 60.0) };
     match death.hits.first() {
-        None => format!("{when}: no hit recorded"),
+        // falls, drowning and the shroud do not come as hits
+        None => format!("{when}: a fall, drowning or the shroud"),
         Some(blow) => {
             let kind = damage_type_names(blow.damage_types).join("/");
             let kind = if kind.is_empty() { String::new() } else { format!(" {kind}") };

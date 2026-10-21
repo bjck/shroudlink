@@ -82,6 +82,21 @@ fn track_logins(events: &[(u32, &[u8])]) {
     }
 }
 
+/// Research (probe file): which event types go by, logged every 5 s.
+fn count_types(events: &[(u32, &[u8])]) {
+    static SEEN: std::sync::Mutex<Option<(std::time::Instant, std::collections::BTreeMap<u32, u32>)>> = std::sync::Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap();
+    let (since, counts) = seen.get_or_insert_with(|| (std::time::Instant::now(), Default::default()));
+    for (hash, _) in events {
+        *counts.entry(*hash).or_default() += 1;
+    }
+    if since.elapsed() >= std::time::Duration::from_secs(5) && !counts.is_empty() {
+        let list: Vec<String> = counts.iter().map(|(h, n)| format!("{}:{n}", shroudlink_sdk::events::name_of(*h).unwrap_or("?"))).collect();
+        log!("probe: events {}", list.join(" "));
+        *seen = None;
+    }
+}
+
 unsafe extern "system" fn dispatch_hook(scheduler: *mut u8) {
     // always read: logins feed the player list
     {
@@ -98,6 +113,9 @@ unsafe extern "system" fn dispatch_hook(scheduler: *mut u8) {
             }
             let all = records(std::slice::from_raw_parts(data, used));
             track_logins(&all);
+            if probing() {
+                count_types(&all);
+            }
             events.extend(all.into_iter().filter(|(hash, _)| mods::wants_game_event(*hash)));
         }
         if !events.is_empty() {
