@@ -6,6 +6,19 @@ $here = $PSScriptRoot
 $server = Join-Path $here 'server'
 $steamcmd = Join-Path $here 'steamcmd\steamcmd.exe'
 
+# EML's patcher (github.com/Brabb3l/kfc-parser, GPL-3.0) is downloaded, not bundled
+function Get-Emm($dir) {
+    $emm = Join-Path $dir 'emm.exe'
+    $sha = 'B1133F6B8EA7000596CC7710901BD8307B48165B0E650C0487A611D90EA49305'
+    if (-not (Test-Path $emm) -or (Get-FileHash $emm).Hash -ne $sha) {
+        Write-Host 'Downloading the EML patcher (emm.exe v0.2.0)...'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest 'https://github.com/Brabb3l/kfc-parser/releases/download/v0.2.0/emm.exe' -OutFile $emm
+        if ((Get-FileHash $emm).Hash -ne $sha) { Remove-Item $emm; throw 'emm.exe download does not match the expected file' }
+    }
+    $emm
+}
+
 if (-not (Test-Path $steamcmd)) {
     Write-Host 'Downloading SteamCMD...'
     $zip = Join-Path $here 'steamcmd.zip'
@@ -23,7 +36,7 @@ Remove-Item (Join-Path $server 'enshrouded_server.kfc.bak') -ErrorAction Silentl
 Copy-Item (Join-Path $here 'mods') $server -Recurse -Force
 
 Write-Host 'Applying Bigger Storage + Bigger Stacks...'
-& (Join-Path $here 'emm.exe') run -g $server --patch
+& (Get-Emm $here) run -g $server --patch
 if ($LASTEXITCODE -ne 0) { throw 'patching failed (see the messages above)' }
 
 $manifest = Get-Content (Join-Path $server 'steamapps\appmanifest_2278520.acf') -Raw

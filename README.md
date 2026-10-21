@@ -45,3 +45,8 @@ re-applied for every build (`UPDATE-SERVER.bat`).
 **Game updates:** never start the server with your world on a new build before the
 patched data files are uploaded - the game deletes everything above the vanilla
 stack size. `UPDATE-SERVER.bat` does it in the safe order.
+
+## Credits
+The data mods (stacks, chest slots) are applied with **EML** by Brabb3l
+([kfc-parser](https://github.com/Brabb3l/kfc-parser), GPL-3.0). The scripts download its
+`emm.exe` v0.2.0 from the official release and check its SHA-256; it is not bundled here.

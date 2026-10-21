@@ -31,6 +31,19 @@ function Wait-User($text) {
     Read-Host '   Press Enter when done'
 }
 
+# EML's patcher (github.com/Brabb3l/kfc-parser, GPL-3.0) is downloaded, not bundled
+function Get-Emm($dir) {
+    $emm = Join-Path $dir 'emm.exe'
+    $sha = 'B1133F6B8EA7000596CC7710901BD8307B48165B0E650C0487A611D90EA49305'
+    if (-not (Test-Path $emm) -or (Get-FileHash $emm).Hash -ne $sha) {
+        Write-Host 'Downloading the EML patcher (emm.exe v0.2.0)...'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest 'https://github.com/Brabb3l/kfc-parser/releases/download/v0.2.0/emm.exe' -OutFile $emm
+        if ((Get-FileHash $emm).Hash -ne $sha) { Remove-Item $emm; throw 'emm.exe download does not match the expected file' }
+    }
+    $emm
+}
+
 function Get-BuildId($manifestText) {
     [regex]::Match($manifestText, '"buildid"\s+"(\d+)"').Groups[1].Value
 }
@@ -109,7 +122,7 @@ try {
     # validate restored the vanilla files; a backup from an older build must not be the patch source
     Remove-Item (Join-Path $ServerDir 'enshrouded_server.kfc.bak') -ErrorAction SilentlyContinue
     Copy-Item (Join-Path $repatch 'mods') $ServerDir -Recurse -Force
-    & (Join-Path $repatch 'emm.exe') run -g $ServerDir --patch | Out-Host
+    & (Get-Emm $repatch) run -g $ServerDir --patch | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'patching failed (see the messages above)' }
     Info "patched files ready for build $build"
 
