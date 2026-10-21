@@ -565,7 +565,8 @@ fn node_height(node: &Node) -> f32 {
         Node::List { entries, .. } => entries.len().min(LIST_ROWS) as f32 * (TEXT_HEIGHT + 2.0),
         Node::ItemGrid { columns, items, .. } => {
             let rows = items.len().div_ceil((*columns).max(1) as usize);
-            rows as f32 * (SLOT_SIZE + SLOT_GAP)
+            // plus a line for the name of the item under the cursor
+            rows as f32 * (SLOT_SIZE + SLOT_GAP) + TEXT_HEIGHT
         }
     }
 }
@@ -639,17 +640,28 @@ unsafe fn draw_node(d: &mut Draw, owner: &str, window: &str, path: &str, node: &
             let mut grid = Frame::new();
             api.open_column(&mut grid, &ident("shroudlinkGrid", &format!("{owner}/{window}/{id}"), 0), SLOT_GAP);
             api.set_size(&grid, width, height);
+            let mut hovered = None;
             for (r, chunk) in items.chunks(columns).enumerate() {
                 let mut row = Frame::new();
                 api.open_row(&mut row, &ident("shroudlinkSlotRow", &format!("{owner}/{window}/{id}"), r as u64), SLOT_GAP);
                 api.set_size(&row, width, SLOT_SIZE);
                 for (c, item) in chunk.iter().enumerate() {
-                    if api.item_slot(item.id, item.count, SLOT_SIZE) {
+                    let (clicked, over) = api.item_slot(item.id, item.count, SLOT_SIZE);
+                    if clicked {
                         event(id, Event::Click { index: Some((r * columns + c) as u32) });
+                    }
+                    if over {
+                        hovered = Some(item);
                     }
                 }
                 api.close_frame(&mut row);
             }
+            // the name of the item under the cursor, in the game's language
+            let name = hovered.map(|item| {
+                let name = api.item_display_name(item.id).unwrap_or_else(|| format!("item {}", item.id));
+                if item.count > 1 { format!("{name} ×{}", item.count) } else { name }
+            });
+            api.text(&name.unwrap_or_default(), STYLE_TAB_TEXT);
             api.close_frame(&mut grid);
         }
     }

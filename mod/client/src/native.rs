@@ -296,8 +296,9 @@ impl Api {
         (self.background)(frame.ptr(), desc.as_ptr() as *const u8);
     }
 
-    /// An inventory slot showing `count` x `item` (icon, rarity frame, tooltip); true when clicked.
-    pub unsafe fn item_slot(&self, item: u32, count: u32, size: f32) -> bool {
+    /// An inventory slot showing `count` x `item` (icon, rarity frame): (clicked, mouse over
+    /// it). The game's own tooltip needs the inventory screen's context and does not show.
+    pub unsafe fn item_slot(&self, item: u32, count: u32, size: f32) -> (bool, bool) {
         // client inventory slot record (0x48 bytes): slot id (0 = none), then the item stack
         let mut slot = [0u64; 9];
         slot[1] = item as u64 | (count as u64) << 32;
@@ -311,11 +312,17 @@ impl Api {
         let mut out = Obj::<0x40>::new();
         self.item_slot.call(out.ptr(), desc.ptr(), compare.ptr(), 0);
         // out starts with the slot rectangle
-        mouse_click_in(*(out.ptr() as *const [f32; 4]))
+        let rect = *(out.ptr() as *const [f32; 4]);
+        (mouse_click_in(rect), mouse_in(rect))
     }
 
-    /// Displayed (localised) name of an item, lower case; cached.
+    /// Displayed (localised) name of an item, lower case (for searching).
     pub unsafe fn item_name(&self, item: u32) -> Option<String> {
+        self.item_display_name(item).map(|n| n.to_lowercase())
+    }
+
+    /// Displayed (localised) name of an item, as the game shows it; cached.
+    pub unsafe fn item_display_name(&self, item: u32) -> Option<String> {
         static NAMES: std::sync::Mutex<Option<std::collections::HashMap<u32, String>>> = std::sync::Mutex::new(None);
         let mut names = NAMES.lock().unwrap();
         let names = names.get_or_insert_with(Default::default);
@@ -340,7 +347,7 @@ impl Api {
         if out.ptr.is_null() || out.len == 0 || out.len > 256 {
             return None;
         }
-        let name = String::from_utf8_lossy(std::slice::from_raw_parts(out.ptr, out.len)).to_lowercase();
+        let name = String::from_utf8_lossy(std::slice::from_raw_parts(out.ptr, out.len)).into_owned();
         names.insert(item, name.clone());
         Some(name)
     }
@@ -496,6 +503,12 @@ pub fn mouse_pos() -> (f32, f32) {
 /// True when a click (press + release) happened this frame and was not taken by a widget yet.
 pub fn mouse_clicked() -> bool {
     MOUSE.lock().unwrap().click.is_some()
+}
+
+/// True when the cursor is inside `rect` (x, y, w, h).
+pub fn mouse_in(rect: [f32; 4]) -> bool {
+    let (x, y) = mouse_pos();
+    x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3]
 }
 
 /// True (once) when the button was pressed and released inside `rect` (x, y, w, h).
