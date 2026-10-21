@@ -58,6 +58,21 @@ chest for a Quick Stack Station) and move all (`FUN_1401ad940`). Around each one
 The game API (`game_api.rs`) reads inventories through the game's own component
 accessors, found as calls inside the quick stack function.
 
+## Game events
+
+Events are reserved with `FUN_1405f6bb0(queue, typeHash, size, extra)`. It appends a
+record to a per-thread queue `{data, capacity, used}`:
+`[u32 typeHash][u16][u8 size][u8 0][payload padded to 8]`. The caller fills the payload
+afterwards.
+
+Once per frame, `FUN_1406ba490(scheduler)` walks every queue (array at `scheduler+0xeb9ef0`),
+calls the handlers registered per type and empties the queues. The core hooks it and
+reads the queues on entry, when every record is complete. Type hashes are the
+`qualifiedHash` of the reflected type names.
+
+The dispatcher was found with a hardware write watchpoint on a queue's `used` field: the
+only code that sets it to 0.
+
 ## Hook registry
 
 All server hook points are in `server/src/hooks.rs`, grouped by feature: `channel`,

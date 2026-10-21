@@ -12,6 +12,7 @@
 
 mod events;
 mod game;
+mod game_events;
 mod game_api;
 mod hooks;
 mod link_host;
@@ -138,6 +139,11 @@ fn init() {
     }
     names::start();
     selftest::install();
+    if hooks::available(hooks::Feature::GameEvents) {
+        if let Err(e) = game_events::install() {
+            hooks::disable(hooks::Feature::GameEvents, e);
+        }
+    }
     if hooks::available(hooks::Feature::Channel) {
         match link_host::install(&module) {
             Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),

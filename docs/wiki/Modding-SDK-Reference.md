@@ -48,6 +48,38 @@ Order per event:
 2. **`on_transfer`** from every mod. Use `game.move_stack` here; kept slots never move.
 3. The game's own transfer runs, with the kept slots hidden from it.
 
+## Game events
+
+Every event the server's ECS raises: 130 types, from `EntityDiedEvent`, `PickupEvent`,
+`LevelUpEvent`, `XPGainedEvent`, `CraftRecipeSuccessEvent`, `BuildingPlaceEvent` and
+`TeleportPlayerEvent` to `HitEvent`.
+
+```rust
+fn game_events(&self) -> Vec<&'static str> {
+    vec!["EntityDiedEvent", "LevelUpEvent", "PickupEvent"]
+}
+
+fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
+    match event.known() {
+        Some(Known::LevelUp { player, level }) => { /* … */ }
+        Some(Known::Pickup { item, count, by, .. }) => { /* … */ }
+        _ => {}
+    }
+    // events.send(client, &message) queues a message to an addon
+}
+```
+
+- `event.known()` decodes the common types: `Login`, `EntityDied`, `Pickup`, `LevelUp`,
+  `XpGained`, `ConsumeItem`, `CraftRecipeSuccess`, `BuildingPlace`, `BuildingTearDown`,
+  `TeleportPlayer`, `RevivedPlayer`, `UnlockSkill`, `TrashItem`.
+- Read any other type from `event.data` with `u32_at`, `f32_at` and `slot_at`, using the
+  layout from the game's reflection data.
+- The full list is `shroudlink_sdk::events::EVENT_TYPES`.
+- Events are delivered once per occurrence, on the game thread, before the game's own
+  handlers. Only subscribed types are decoded at all.
+- Players without the addon cause events too: these are server events, not addon
+  messages.
+
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 
 | Call | Returns |
@@ -76,11 +108,12 @@ sessions, store **positions** (see [[UI and building blocks|Modding-UI-and-Build
 
 ## The C ABI (other languages)
 
-Mods export `shroudlink_mod_v2() -> *const ModDecl`. `HostApi` and `ModDecl` are
+Mods export `shroudlink_mod_v2() -> *const ModDecl`; `decl.version` says the layout
+(3 = with game events). `HostApi` and `ModDecl` are
 `#[repr(C)]` structs in `sdk/src/lib.rs`. Messages cross the boundary as UTF-8 JSON with
 a length, and game calls are plain C functions taking the opaque `game` pointer of the
 current callback.
 
-- v2 appended its fields to the v1 layout, and the host still loads v1 mods
-  (`shroudlink_mod_v1`); they get no inventory events.
+- v2 appended inventory events to the v1 layout, and v3 appended game events. The host
+  still loads v1 and v2 mods; they get no events their version does not know.
 - New host functions are only ever appended.

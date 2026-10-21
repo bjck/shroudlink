@@ -40,6 +40,17 @@ How the hook points were found, and how to find new ones. Tools are in
 - Prefer the game's own accessors to raw memory layouts.
 - After every change: unit tests, then `selftest.py`. For client changes, check in game.
 
+## Techniques that worked
+
+- **Event type hashes as constants:** `qualifiedHash` values from the reflection data
+  show up as `mov edx, imm32` right before the event allocator. That is how the generic
+  event allocator was found.
+- **A hardware write watchpoint** (DR0 on all threads, plus a vectored exception handler
+  that logs RIP when the value becomes 0) found the single function that empties the
+  event queues, which is the dispatcher.
+- **The world system that builds an inventory context without players**
+  (`FUN_14019c480`) lets the self-test call inventory functions with no client at all.
+
 ## Things that were easy to get wrong
 
 - Client and server **share** entity ids within a session; ids change between sessions.

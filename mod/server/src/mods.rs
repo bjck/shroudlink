@@ -35,13 +35,51 @@ pub trait ServerMod: Send {
     fn on_transfer(&mut self, _game: *mut c_void, _event: &InventoryEvent) -> u32 {
         0
     }
+    /// Game event type ids the mod wants (asked once, when it is registered).
+    fn game_events(&self) -> Vec<u32> {
+        Vec::new()
+    }
+    fn on_game_event(&mut self, _hash: u32, _data: &[u8]) {}
 }
 
 static MODS: Mutex<Vec<Box<dyn ServerMod>>> = Mutex::new(Vec::new());
 
 pub fn register(m: Box<dyn ServerMod>) {
     log!("shroudlink: mod '{}' registered", m.id());
-    MODS.lock().unwrap_or_else(|e| e.into_inner()).push(m);
+    let mut mods = MODS.lock().unwrap_or_else(|e| e.into_inner());
+    mods.push(m);
+    update_subscriptions(&mods);
+}
+
+/// Game event types any mod wants; checked for every queued event, so kept outside the
+/// mod lock.
+static SUBSCRIBED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn update_subscriptions(mods: &[Box<dyn ServerMod>]) {
+    let mut all: Vec<u32> = mods.iter().flat_map(|m| m.game_events()).collect();
+    all.sort_unstable();
+    all.dedup();
+    *SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()) = all;
+}
+
+pub(crate) fn has_game_event_subscribers() -> bool {
+    !SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+}
+
+pub(crate) fn wants_game_event(hash: u32) -> bool {
+    SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()).binary_search(&hash).is_ok()
+}
+
+/// Hands this frame's subscribed game events to the mods that want them.
+pub(crate) fn game_events(events: &[(u32, &[u8])]) {
+    with_mods(|mods| {
+        for m in mods.iter_mut() {
+            let wanted = m.game_events();
+            for (hash, data) in events.iter().filter(|(h, _)| wanted.contains(h)) {
+                m.on_game_event(*hash, data);
+            }
+        }
+    });
 }
 
 /// Swaps in a new build of a mod (hot reload) and welcomes the connected clients again.
@@ -55,6 +93,7 @@ pub(crate) fn replace(host: &mut Host, mut m: Box<dyn ServerMod>) {
             Some(old) => *old = m,
             None => mods.push(m),
         }
+        update_subscriptions(mods);
     });
 }
 

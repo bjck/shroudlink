@@ -52,6 +52,11 @@ A mod can:
   as `ui_event` with the section id as window) and show short HUD messages (`Notify`).
   `examples/hello_mod` adds a "Wave" button that answers with a message.
 
+- react to **game events**: `game_events()` names the types (e.g. "EntityDiedEvent",
+  "PickupEvent", "LevelUpEvent"), and `on_game_event` gets each occurrence;
+  `event.known()` decodes the common ones. `examples/hello_mod` announces deaths and
+  level-ups.
+
 Equipped items, the item in hand and the actionbar are always protected by the core.
 `mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).
 

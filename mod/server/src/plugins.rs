@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chestsort_common::log;
 use serde_json::{json, Value};
-use shroudlink_sdk::{HostApi, InventoryEvent, ModDecl, ModDeclV1, ABI_VERSION};
+use shroudlink_sdk::{HostApi, InventoryEvent, ModDecl, ModDeclV1, ModDeclV2, ABI_VERSION};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
 use crate::game_api;
@@ -52,24 +52,36 @@ static API: HostApi = HostApi {
 
 enum Decl {
     V1(&'static ModDeclV1),
-    V2(&'static ModDecl),
+    V2(&'static ModDeclV2),
+    V3(&'static ModDecl),
 }
 
 struct Plugin {
     decl: Decl,
     id: &'static str,
+    /// game event types (v3), asked once at load
+    game_events: Vec<u32>,
 }
 
 // the mod's state is only touched under the mod registry lock
 unsafe impl Send for Plugin {}
 
 impl Plugin {
-    /// The v1 part every version has.
+    /// The v1 part every version has (later versions append to it).
     fn v1(&self) -> &ModDeclV1 {
         match self.decl {
             Decl::V1(d) => d,
-            // v2 starts with the v1 layout
-            Decl::V2(d) => unsafe { &*(d as *const ModDecl as *const ModDeclV1) },
+            Decl::V2(d) => unsafe { &*(d as *const ModDeclV2 as *const ModDeclV1) },
+            Decl::V3(d) => unsafe { &*(d as *const ModDecl as *const ModDeclV1) },
+        }
+    }
+
+    /// The v2 part (inventory events), for v2 and later.
+    fn v2(&self) -> Option<&ModDeclV2> {
+        match self.decl {
+            Decl::V1(_) => None,
+            Decl::V2(d) => Some(d),
+            Decl::V3(d) => Some(unsafe { &*(d as *const ModDecl as *const ModDeclV2) }),
         }
     }
 }
@@ -95,7 +107,7 @@ impl ServerMod for Plugin {
         unsafe { (d.on_leave)(d.state, &API, host as *mut Host as *mut c_void, client.0) }
     }
     fn keep(&mut self, game: *mut c_void, event: &InventoryEvent) -> Vec<u64> {
-        let Decl::V2(d) = self.decl else { return Vec::new() };
+        let Some(d) = self.v2() else { return Vec::new() };
         let mut out = vec![0u64; 64];
         let n = unsafe { (d.keep)(d.state, &API, game, event, out.as_mut_ptr(), out.len()) };
         if n > out.len() {
@@ -106,8 +118,16 @@ impl ServerMod for Plugin {
         out
     }
     fn on_transfer(&mut self, game: *mut c_void, event: &InventoryEvent) -> u32 {
-        let Decl::V2(d) = self.decl else { return 0 };
+        let Some(d) = self.v2() else { return 0 };
         unsafe { (d.on_transfer)(d.state, &API, game, event) }
+    }
+    fn game_events(&self) -> Vec<u32> {
+        self.game_events.clone()
+    }
+    fn on_game_event(&mut self, hash: u32, data: &[u8]) {
+        if let Decl::V3(d) = self.decl {
+            unsafe { (d.on_game_event)(d.state, &API, hash, data.as_ptr(), data.len()) }
+        }
     }
 }
 
@@ -118,13 +138,15 @@ unsafe fn load(path: &Path) -> Result<Plugin, String> {
         return Err("cannot load".into());
     }
     let decl = if let Some(entry) = GetProcAddress(module, b"shroudlink_mod_v2\0".as_ptr()) {
-        let entry: extern "C" fn() -> *const ModDecl = std::mem::transmute(entry);
+        // the declaration says which layout it has: v2, or v3 with game events appended
+        let entry: extern "C" fn() -> *const ModDeclV2 = std::mem::transmute(entry);
         let decl = entry().as_ref().ok_or("shroudlink_mod_v2 returned null")?;
-        if decl.version != 2 {
-            return Err(format!("ABI version {} (host {ABI_VERSION})", decl.version));
-        }
         (decl.on_load)(decl.state, &API);
-        Decl::V2(decl)
+        match decl.version {
+            2 => Decl::V2(decl),
+            3.. => Decl::V3(&*(decl as *const ModDeclV2 as *const ModDecl)),
+            v => return Err(format!("ABI version {v} (host {ABI_VERSION})")),
+        }
     } else {
         let entry = GetProcAddress(module, b"shroudlink_mod_v1\0".as_ptr()).ok_or("no shroudlink_mod_v2/v1 export")?;
         let entry: extern "C" fn() -> *const ModDeclV1 = std::mem::transmute(entry);
@@ -134,7 +156,13 @@ unsafe fn load(path: &Path) -> Result<Plugin, String> {
         }
         Decl::V1(decl)
     };
-    let mut plugin = Plugin { decl, id: "" };
+    let mut plugin = Plugin { decl, id: "", game_events: Vec::new() };
+    if let Decl::V3(d) = plugin.decl {
+        let mut hashes = vec![0u32; 256];
+        let n = (d.game_events)(d.state, hashes.as_mut_ptr(), hashes.len());
+        hashes.truncate(n.min(256));
+        plugin.game_events = hashes;
+    }
     let d = plugin.v1();
     let mut len = 0usize;
     let ptr = (d.id)(d.state, &mut len);
@@ -268,7 +296,8 @@ mod tests {
         }
         let mut plugin = unsafe { load(&dll) }.expect("loads");
         assert_eq!(plugin.id(), "hello");
-        assert!(matches!(plugin.decl, Decl::V2(_)), "built against SDK v2");
+        assert!(matches!(plugin.decl, Decl::V3(_)), "built against SDK v3");
+        assert!(!plugin.game_events().is_empty(), "hello subscribes to game events");
         let mut host = Host::default();
         let nonce = 0x42;
         host.connect_for_test(4, nonce);

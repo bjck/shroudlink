@@ -27,8 +27,12 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 pub use serde_json::{json, Value};
 pub use shroudlink::ui;
 
-/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1 mods.
-pub const ABI_VERSION: u32 = 2;
+mod event_types;
+pub mod events;
+pub use events::{GameEvent, Known};
+
+/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1 and v2 mods.
+pub const ABI_VERSION: u32 = 3;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -104,6 +108,26 @@ pub struct ModDecl {
     /// Writes up to `cap` slot ids to keep; returns how many there are.
     pub keep: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, game: *mut c_void, event: *const InventoryEvent, out: *mut u64, cap: usize) -> usize,
     /// Moves stacks before the game does; returns the number of items moved.
+    pub on_transfer: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, game: *mut c_void, event: *const InventoryEvent) -> u32,
+    // v3
+    /// Writes up to `cap` event type ids the mod wants; returns how many there are.
+    pub game_events: unsafe extern "C" fn(state: *mut c_void, out: *mut u32, cap: usize) -> usize,
+    /// One game event: its type id and payload.
+    pub on_game_event: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, hash: u32, data: *const u8, len: usize),
+}
+
+/// The v2 export layout (v1 fields plus inventory events), for hosts that load v2 mods.
+#[doc(hidden)]
+#[repr(C)]
+pub struct ModDeclV2 {
+    pub version: u32,
+    pub state: *mut c_void,
+    pub id: unsafe extern "C" fn(state: *mut c_void, len: *mut usize) -> *const u8,
+    pub on_join: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, ctx: *mut c_void, client: u64),
+    pub on_message: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, ctx: *mut c_void, client: u64, json: *const u8, len: usize),
+    pub on_leave: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, ctx: *mut c_void, client: u64),
+    pub on_load: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi),
+    pub keep: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, game: *mut c_void, event: *const InventoryEvent, out: *mut u64, cap: usize) -> usize,
     pub on_transfer: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, game: *mut c_void, event: *const InventoryEvent) -> u32,
 }
 
@@ -190,6 +214,18 @@ impl Game<'_> {
     }
 }
 
+/// Sends messages to client addons from a game event callback (delivered right after it).
+pub struct Events<'a> {
+    api: &'a HostApi,
+}
+
+impl Events<'_> {
+    pub fn send(&self, client: u64, message: &Value) {
+        let text = message.to_string();
+        unsafe { (self.api.send)(std::ptr::null_mut(), client, text.as_ptr(), text.len()) }
+    }
+}
+
 /// A server mod. `client` identifies a connected addon session.
 pub trait Mod: Send {
     fn id(&self) -> &'static str;
@@ -207,6 +243,13 @@ pub trait Mod: Send {
     fn on_transfer(&mut self, _game: &Game, _event: &InventoryEvent) -> u32 {
         0
     }
+    /// Game event types to receive (names from [`events::EVENT_TYPES`], e.g. "EntityDiedEvent").
+    fn game_events(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+    /// One game event of a type from [`Mod::game_events`]. Runs on the game thread once per
+    /// event, so keep it short.
+    fn on_game_event(&mut self, _events: &Events, _event: &GameEvent) {}
 }
 
 static API: AtomicPtr<HostApi> = AtomicPtr::new(std::ptr::null_mut());
@@ -236,7 +279,7 @@ pub mod glue {
 
     pub fn decl<M: Mod + 'static>(m: M) -> ModDecl {
         let state = Box::into_raw(Box::new(Box::new(m) as Box<dyn Mod>)) as *mut c_void;
-        ModDecl { version: ABI_VERSION, state, id, on_join, on_message, on_leave, on_load, keep, on_transfer }
+        ModDecl { version: ABI_VERSION, state, id, on_join, on_message, on_leave, on_load, keep, on_transfer, game_events, on_game_event }
     }
 
     unsafe fn this<'a>(state: *mut c_void) -> &'a mut Box<dyn Mod> {
@@ -278,9 +321,32 @@ pub mod glue {
     unsafe extern "C" fn on_transfer(state: *mut c_void, api: *const HostApi, game: *mut c_void, event: *const InventoryEvent) -> u32 {
         this(state).on_transfer(&Game { api: &*api, game }, &*event)
     }
+
+    unsafe extern "C" fn game_events(state: *mut c_void, out: *mut u32, cap: usize) -> usize {
+        let names = this(state).game_events();
+        let hashes: Vec<u32> = names
+            .iter()
+            .filter_map(|n| {
+                let hash = events::hash_of(n);
+                if hash.is_none() {
+                    log(&format!("unknown game event type '{n}'"));
+                }
+                hash
+            })
+            .collect();
+        std::ptr::copy_nonoverlapping(hashes.as_ptr(), out, hashes.len().min(cap));
+        hashes.len()
+    }
+
+    unsafe extern "C" fn on_game_event(state: *mut c_void, api: *const HostApi, hash: u32, data: *const u8, len: usize) {
+        let Some(name) = events::name_of(hash) else { return };
+        let event = GameEvent { hash, name, data: std::slice::from_raw_parts(data, len) };
+        this(state).on_game_event(&Events { api: &*api }, &event);
+    }
 }
 
-/// Exports `shroudlink_mod_v2` for a [`Mod`] type implementing `Default`.
+/// Exports `shroudlink_mod_v2` (the declaration carries ABI version 3) for a [`Mod`] type
+/// implementing `Default`.
 #[macro_export]
 macro_rules! export_mod {
     ($t:ty) => {

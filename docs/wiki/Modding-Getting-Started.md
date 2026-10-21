@@ -4,6 +4,7 @@ A shroudlink mod is a DLL in the server's `shroudlink_mods/` folder. It can:
 
 - show windows in the players' MODS tab and react to clicks and text input;
 - take part in every inventory transfer: keep slots, move stacks itself;
+- react to game events: deaths, pickups, level-ups, crafting, building and 125 more;
 - use the addon's building blocks: slot hotkeys, slot marks, data stored on the player's
   PC, rows in the chest screen, HUD messages.
 

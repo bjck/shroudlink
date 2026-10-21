@@ -5,7 +5,8 @@ keys, slot marks, per-server storage, backpack layout; see `link/src/ui.rs`) are
 Phase 3: a hook registry (`server/src/hooks.rs`) switches features off individually when a
 game update breaks one hook point; `research/scripts/checksigs.py` checks a new build
 offline. Phase 2b: backpack panel sections and HUD notifications; `newmod.py` creates a
-mod from a template.
+mod from a template. ABI v3: game events (all 130 ECS event types, read from the game's
+event queues before dispatch; `server/src/game_events.rs`).
 
 ## Goal
 
