@@ -302,6 +302,18 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     let reply = send(json!({ "mod": "chestsort", "op": "slot_key", "key": "L", "slot": locked, "position": position, "item": ore }));
     let cleared = reply.iter().rev().find(|m| m["op"] == "marks").map(|m| m["marks"][0]["slots"].clone());
     report.check("L again unlocks", if cleared == Some(json!([])) { Ok("rim removed".into()) } else { Err(format!("marks message: {cleared:?}")) });
+
+    // ---- world access for mods (HostApi v4), outside any player action ----
+    let slots_seen = crate::world::inventory(chest);
+    report.check("world inventory", if slots_seen.len() >= 8 { Ok(format!("{} slot(s) in the test chest", slots_seen.len())) } else { Err(format!("{} slot(s)", slots_seen.len())) });
+    let ores_in_chest = |s: &[(u64, u32, u32)]| s.iter().filter(|x| x.1 == ore).map(|x| x.2).sum::<u32>();
+    let before = ores_in_chest(&crate::world::inventory(chest));
+    let moved = put(game, ctx, player, 3, ore, 4).map_or(0, |slot| crate::world::move_stack(player, slot, chest));
+    let after = ores_in_chest(&crate::world::inventory(chest));
+    report.check("world move_stack", if moved == 4 && after == before + 4 { Ok(format!("4 iron bars moved, chest {before} -> {after}")) } else { Err(format!("moved {moved}, chest {before} -> {after}")) });
+    let mut transform = [0u8; 64];
+    let size = crate::world::read_component(chest, crate::components::hash::CURRENT_TRANSFORM, &mut transform);
+    report.check("world component read", if size == 56 { Ok(format!("CurrentTransform of the chest, {size} bytes")) } else { Err(format!("size {size}")) });
     FAKE_PLAYER.store(0, Ordering::SeqCst);
     *FAKE_NAME.lock().unwrap() = None;
 }
