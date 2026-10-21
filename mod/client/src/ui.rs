@@ -292,9 +292,6 @@ pub fn draw(api: &Api) {
             if page {
                 draw_page(&mut d, &mut ui, &mut pending);
             } else {
-                if screen == SCREEN_GAMEPLAY {
-                    draw_status(&mut d);
-                }
                 draw_notes(&mut d, &ui.notes);
             }
         }
@@ -310,27 +307,6 @@ pub fn draw(api: &Api) {
         crate::link::send(event.to_message(&owner));
     }
 }
-
-unsafe fn draw_status(d: &mut Draw) {
-    if !crate::link::connected() {
-        return;
-    }
-    let api = d.api;
-    let status = format!("shroudlink · {} server mod(s)", crate::link::server_mods().len());
-    let mut layer = Layer::new();
-    let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkHud"), LAYER_HUD);
-    let mut root_frame = Frame::new();
-    api.open_root(&mut root_frame, root);
-    let mut panel = Frame::new();
-    api.open_column(&mut panel, &d.key("shroudlinkStatus"), 2.0);
-    api.set_alignment(&panel, 0x0103);
-    api.set_padding(&panel, [0.0, 120.0, 24.0, 0.0]);
-    api.text(&status, STYLE_TAB_TEXT);
-    api.close_frame(&mut panel);
-    api.close_frame(&mut root_frame);
-    api.end_layer(&mut layer);
-}
-
 
 /// The chest screen draws an inventory panel header (title row); index 0 is the backpack.
 /// The item search is embedded right below it, inside the panel's own layout, so the
