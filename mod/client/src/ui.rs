@@ -33,6 +33,21 @@ pub struct UiState {
 
 pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), last_screen: 0 });
 
+/// What the UI shows, for test automation.
+pub fn snapshot() -> Value {
+    let ui = UI.lock().unwrap();
+    serde_json::json!({
+        "screen": ui.last_screen,
+        "page_open": mods_page_open(),
+        "menu": ui.menu.iter().map(|(o, e)| serde_json::json!({ "owner": o, "id": e.id, "label": e.label })).collect::<Vec<_>>(),
+        "windows": ui.windows.iter().map(|w| serde_json::json!({ "owner": w.owner, "id": w.window.id, "title": w.window.title })).collect::<Vec<_>>(),
+        "sections": ui.sections.iter().map(|(o, i, _)| format!("{o}/{i}")).collect::<Vec<_>>(),
+        "notes": ui.notes.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
+        "search": SEARCH.lock().unwrap().clone(),
+        "search_open": SEARCH_OPEN.load(Ordering::Relaxed),
+    })
+}
+
 /// How long a notification stays, and how many are shown at once.
 const NOTE_SECONDS: u64 = 6;
 const NOTES_MAX: usize = 4;
@@ -289,6 +304,7 @@ pub fn draw(api: &Api) {
     }
     // an L press is meant for the slot under the cursor in the frame it happened
     crate::input::clear_slot_key();
+    crate::automation::end_frame();
     for (owner, event) in pending.events {
         log!("ui: event {owner}/{}/{} {:?}", event.window, event.node, event.event);
         crate::link::send(event.to_message(&owner));

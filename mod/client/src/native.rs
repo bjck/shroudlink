@@ -473,6 +473,21 @@ unsafe fn update_mouse() {
     m.down = down;
 }
 
+/// The game window's client size in pixels (0, 0 when unknown).
+pub fn client_size() -> (i32, i32) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetClientRect};
+    let title: Vec<u16> = "Enshrouded ".encode_utf16().collect();
+    unsafe {
+        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if !hwnd.is_null() {
+            GetClientRect(hwnd, &mut r);
+        }
+        (r.right, r.bottom)
+    }
+}
+
 /// Cursor position in UI units.
 pub fn mouse_pos() -> (f32, f32) {
     MOUSE.lock().unwrap().pos
@@ -539,6 +554,10 @@ unsafe extern "system" fn item_slot_hook(out: *mut u8, desc: *mut u8, compare: *
     };
     SLOT_TINT.store(0, std::sync::atomic::Ordering::Relaxed);
     if let Some(position) = position {
+        if crate::automation::enabled() {
+            let mark = mark.map(|m| if m == shroudlink::ui::MarkStyle::Rim { "rim" } else { "dim" });
+            crate::automation::record_slot(id, position, item, *(out as *const [f32; 4]), mark);
+        }
         if let Some(key) = crate::input::slot_key_pressed_over(*(out as *const [f32; 4]), mouse_pos()) {
             crate::slots::key_pressed(key, id, position, item);
         }

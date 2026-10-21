@@ -41,6 +41,10 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
   a fake addon session (welcome, MODS menu, windows, item search), quick stack and move all
   through the real game functions (category sorting, locks) and hot reload. Run it after
   every core or mod change and after game updates. How it works: `server/src/selftest.rs`.
+- **Client UI, automated:** with `shroudlink_automation` in the game folder, the addon
+  reports its state on 127.0.0.1:47911, and `research/scripts/gamectl.py` drives the game
+  with real input (`test chest`: search, locks, quick stack). The player has to stand in
+  front of a chest, and nobody may use mouse or keyboard while it runs.
 - Not covered by the self-test (needs a real player): equipment protection, client UI.
   Verify those in game, and say so when you could not.
 - **Client dev loop:** `python research/scripts/inject.py enshrouded.exe mod/target/release/shroudlink_client.dll`

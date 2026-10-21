@@ -64,6 +64,27 @@ Only that feature may switch off. The test reports which features stayed on.
 **Not covered:** anything that needs a real player (equipment protection), and how the
 addon draws things. Check those in game.
 
+## Automated in-game tests
+
+With a file `shroudlink_automation` in the game folder, the addon reports what is on
+screen on `127.0.0.1:47911`, only locally:
+- screen id and connection;
+- mod menu, windows and backpack sections;
+- HUD messages and the search;
+- every backpack slot with its item, mark and screen rectangle.
+
+`research/scripts/gamectl.py` drives the game with real keyboard and mouse input and
+checks the result through that interface:
+
+```
+python research/scripts/gamectl.py state        # what the addon sees
+python research/scripts/gamectl.py test chest   # stand in front of a chest first
+```
+
+`test chest` opens the chest (E), tests the search (`/`, typing, Esc, Esc), locks a slot
+(L, rim), quick stacks (hold R), checks that the locked item stayed, unlocks it and closes
+the chest. Characters are typed as Unicode input, so any keyboard layout works.
+
 ## In game
 
 1. Run a local server (`server/enshrouded_server.exe`, port 15637) and join
