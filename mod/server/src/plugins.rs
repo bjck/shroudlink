@@ -48,6 +48,9 @@ static API: HostApi = HostApi {
     chest_name: game_api::chest_name,
     max_stack: game_api::max_stack,
     move_stack: game_api::move_stack,
+    players: crate::world::api_players,
+    position: crate::world::api_position,
+    teleport: crate::world::api_teleport,
 };
 
 enum Decl {

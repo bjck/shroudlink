@@ -62,10 +62,6 @@ fn update_subscriptions(mods: &[Box<dyn ServerMod>]) {
     *SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()) = all;
 }
 
-pub(crate) fn has_game_event_subscribers() -> bool {
-    !SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
-}
-
 pub(crate) fn wants_game_event(hash: u32) -> bool {
     SUBSCRIBED.lock().unwrap_or_else(|e| e.into_inner()).binary_search(&hash).is_ok()
 }
@@ -155,6 +151,9 @@ pub(crate) fn leave(host: &mut Host, client: ClientId) {
 }
 
 pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
+    if crate::game_events::probing() {
+        log!("probe: message {}", message.to_string().chars().take(160).collect::<String>());
+    }
     let Some(target) = message.get("mod").and_then(Value::as_str) else {
         log!("shroudlink: message without \"mod\" from {:016x}", client.0);
         return;
@@ -164,6 +163,38 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("ping") => host.send(client, &json!({ "mod": "shroudlink", "op": "pong", "echo": message.get("echo") })),
             // a reloaded addon continues its session and wants the welcome again
             Some("hello_again") => join(host, client),
+            // test automation (only with a shroudlink_probe file): players, positions, teleport
+            Some("debug_players") if crate::game_events::probing() => {
+                let players: Vec<Value> = crate::world::players().into_iter().map(|p| json!({ "entity": p, "position": crate::world::position(p) })).collect();
+                log!("debug_players: {}", Value::Array(players.clone()));
+                host.send(client, &json!({ "mod": "shroudlink", "op": "debug_players", "players": players }));
+            }
+            Some("debug_inventories") if crate::game_events::probing() => {
+                let radius = message.get("radius").and_then(Value::as_f64).unwrap_or(30.0);
+                let player = crate::world::players().first().copied();
+                let near = player.and_then(crate::world::position).map(|p| crate::world::inventories_near(p, radius)).unwrap_or_default();
+                let list: Vec<Value> = near.iter().map(|(e, p, n)| json!({ "entity": e, "position": p, "name": n })).collect();
+                log!("debug_inventories: {}", Value::Array(list));
+            }
+            Some("debug_face") if crate::game_events::probing() => {
+                let yaw = message.get("yaw").and_then(Value::as_f64).unwrap_or(0.0);
+                if let Some(p) = crate::world::players().first().copied() {
+                    log!("debug_face: {}", crate::world::face(p, yaw));
+                }
+            }
+            Some("debug_teleport") if crate::game_events::probing() => {
+                let num = |k: &str| message.get(k).and_then(Value::as_f64);
+                let player = message.get("player").and_then(Value::as_u64).map(|p| p as u32).or_else(|| crate::world::players().first().copied());
+                let done = player.and_then(|p| {
+                    let here = crate::world::position(p)?;
+                    let to = match (num("x"), num("y"), num("z")) {
+                        (Some(x), Some(y), Some(z)) => [x, y, z],
+                        _ => [here[0] + num("dx").unwrap_or(0.0), here[1] + num("dy").unwrap_or(0.0), here[2] + num("dz").unwrap_or(0.0)],
+                    };
+                    Some(crate::world::teleport(p, to))
+                });
+                host.send(client, &json!({ "mod": "shroudlink", "op": "debug_teleport", "done": done }));
+            }
             _ => {}
         }
         return;

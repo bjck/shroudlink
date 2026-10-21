@@ -13,10 +13,9 @@
 
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use chestsort_common::log;
-use retour::GenericDetour;
 use serde_json::{json, Value};
 
 use crate::events;
@@ -29,32 +28,14 @@ pub const MARKER: &str = "shroudlink_selftest";
 const REPORT: &str = "shroudlink_selftest.txt";
 
 
-/// Descriptor bytes read by the context builder (last field at +0xe8).
-const DESCRIPTOR: usize = 0xf0;
-/// The builder writes up to +0x71a8; the game keeps contexts in ~0x71d8 bytes of stack.
-const CTX_BYTES: usize = 0x8000;
 /// Entity ids searched for inventories (the lookup is a bounds-checked hash map).
 const MAX_ENTITY: u32 = 2_000_000;
 /// Player slot used by the fake client addon session.
 const FAKE_SLOT: usize = link_host::SLOTS - 1;
 const FAKE_CLIENT: u64 = 0x5e1f_7e57;
 
-type SystemFn = unsafe extern "system" fn(system: *mut u8);
-type BuildCtxFn = unsafe extern "system" fn(ctx: *mut u8, descriptor: *const u8);
-type InitCtxFn = unsafe extern "system" fn(ctx: *mut u8);
-
-struct Hooks {
-    boot: GenericDetour<SystemFn>,
-    build: GenericDetour<BuildCtxFn>,
-    init: InitCtxFn,
-}
-unsafe impl Send for Hooks {}
-unsafe impl Sync for Hooks {}
-
-static HOOKS: OnceLock<Hooks> = OnceLock::new();
-static IN_BOOT: AtomicBool = AtomicBool::new(false);
 static DONE: AtomicBool = AtomicBool::new(false);
-static CAPTURED: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+
 /// A name the test gives one inventory (chests near players only load with a player).
 static FAKE_NAME: Mutex<Option<(u32, String)>> = Mutex::new(None);
 
@@ -68,47 +49,18 @@ pub fn install() {
         return;
     }
     let _ = std::fs::remove_file(chestsort_common::game_dir().join(REPORT));
-    let result = (|| unsafe {
-        for feature in [Feature::SelfTest, Feature::Inventory] {
-            if let Some(why) = hooks::problem(feature) {
-                return Err(format!("feature {} is off ({why})", feature.name()));
-            }
-        }
-        let boot = GenericDetour::<SystemFn>::new(std::mem::transmute::<usize, SystemFn>(hooks::address("boot_system")?), boot_hook).map_err(|e| e.to_string())?;
-        let build = GenericDetour::<BuildCtxFn>::new(std::mem::transmute::<usize, BuildCtxFn>(hooks::address("build_ctx")?), build_hook).map_err(|e| e.to_string())?;
-        let init = std::mem::transmute::<usize, InitCtxFn>(hooks::address("init_ctx")?);
-        let hooks = HOOKS.get_or_init(|| Hooks { boot, build, init });
-        hooks.boot.enable().map_err(|e| e.to_string())?;
-        hooks.build.enable().map_err(|e| e.to_string())?;
-        Ok::<_, String>(())
-    })();
-    match result {
-        Ok(()) => log!("selftest: armed, runs once the world has loaded"),
-        Err(e) => write_report(&format!("FAIL setup: {e}\n")),
-    }
-}
-
-unsafe extern "system" fn build_hook(ctx: *mut u8, descriptor: *const u8) {
-    if IN_BOOT.load(Ordering::Relaxed) {
-        let mut captured = CAPTURED.lock().unwrap();
-        if captured.is_none() {
-            *captured = Some(std::slice::from_raw_parts(descriptor, DESCRIPTOR).to_vec());
+    for feature in [Feature::WorldContext, Feature::Inventory] {
+        if let Some(why) = hooks::problem(feature) {
+            write_report(&format!("FAIL setup: feature {} is off ({why})\nRESULT setup\n", feature.name()));
+            return;
         }
     }
-    HOOKS.get().unwrap().build.call(ctx, descriptor)
-}
-
-unsafe extern "system" fn boot_hook(system: *mut u8) {
-    let hooks = HOOKS.get().unwrap();
-    IN_BOOT.store(true, Ordering::Relaxed);
-    hooks.boot.call(system);
-    IN_BOOT.store(false, Ordering::Relaxed);
-    let descriptor = CAPTURED.lock().unwrap().clone();
-    if let Some(descriptor) = descriptor {
+    log!("selftest: armed, runs once the world has loaded");
+    crate::world_ctx::on_ready(|| {
         if !DONE.swap(true, Ordering::SeqCst) {
-            run(&descriptor);
+            unsafe { crate::world_ctx::with(|ctx| run(ctx)) };
         }
-    }
+    });
 }
 
 fn write_report(text: &str) {
@@ -170,17 +122,10 @@ fn ui_event(window: &str, node: &str, event: Value) -> Value {
     json!({ "mod": "chestsort", "op": "ui_event", "event": { "window": window, "node": node, "event": event } })
 }
 
-unsafe fn run(descriptor: &[u8]) {
-    let hooks = HOOKS.get().unwrap();
+unsafe fn run(ctx: *mut Ctx) {
     let mut report = Report { text: String::new(), failed: 0 };
     let _ = writeln!(report.text, "shroudlink selftest {}", env!("CARGO_PKG_VERSION"));
 
-    // our own game context, built like the world system built its own
-    let mut memory = vec![0u128; CTX_BYTES / 16];
-    let ctx = memory.as_mut_ptr() as *mut u8;
-    (hooks.init)(ctx);
-    hooks.build.call(ctx, descriptor.as_ptr());
-    let ctx = ctx as *mut Ctx;
     let game = events::game();
 
     // ---- hook registry ----

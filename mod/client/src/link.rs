@@ -187,7 +187,16 @@ unsafe extern "system" fn store_hook(out: *mut u8, strings: *mut c_void, id: u64
 
 static TICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// When the client last ticked (it only ticks while in a world).
+static LAST_TICK: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Milliseconds since the last client tick (None: never ticked).
+pub fn since_last_tick() -> Option<u128> {
+    LAST_TICK.lock().unwrap().map(|t| t.elapsed().as_millis())
+}
+
 unsafe extern "system" fn tick_hook(client: *mut u8, a: *mut c_void, flag: u8) {
+    *LAST_TICK.lock().unwrap() = Some(std::time::Instant::now());
     let game = GAME.get().unwrap();
     let n = TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if n == 0 || n.is_power_of_two() && n >= 1024 {

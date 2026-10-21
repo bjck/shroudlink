@@ -95,7 +95,19 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
   directions**: chest → player too. Mods get `InventoryEvent { from, to }` and must check
   `game.is_player(from)`. The R button ("move all") is `FUN_1401ad940(out, ctx, from, to, ..)`.
 - The game's own transfer skips empty stacks; kept stacks are hidden from it by zeroing
-  their count for the duration of the call and restoring it afterwards (`events.rs`).
+  their count for the duration of the call and restoring it afterwards (`events.rs`). The
+  game's own "move all" (tap R) takes the action bar along: the core hides the player's
+  equipment, item in hand and action bar from every transfer too.
+- Positions are `WorldPosition` (sint64 metres * 2^32). Teleport = write `CurrentTransform`
+  and `LastTransform` + increment `TeleportCount` (the client snaps to it). Component type
+  indices come from the descriptor table found through a context handle (`components.rs`).
+- `world_ctx` builds contexts from the boot system's descriptor; its first field points at
+  a stack object, so the core keeps a relocated heap copy (`world_ctx.rs`). Using the raw
+  descriptor later crashes.
+- A crash or panic of the core is logged to shroudlink.log (`CRASH:` / `PANIC:`); the
+  server has no crash handler of its own.
+- In game automation: E interacts with what the *camera* looks at; 1500 mouse counts turn
+  it about 180 degrees. `gamectl.py goto <chest>` teleports and sweeps the camera.
 - UI: frames need unique keys (`UiStr::keyed`) and explicit sizes; widget clicks use
   our own hit testing on layout rects (node+0x114, 1080p UI units); the text input
   subclasses the game's WndProc and must swallow key **downs** only, never releases or

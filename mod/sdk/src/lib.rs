@@ -31,8 +31,9 @@ mod event_types;
 pub mod events;
 pub use events::{GameEvent, Known};
 
-/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1 and v2 mods.
-pub const ABI_VERSION: u32 = 3;
+/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v3 mods. `HostApi`
+/// tells its own version: functions newer than it must not be called (the SDK checks).
+pub const ABI_VERSION: u32 = 4;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -91,6 +92,13 @@ pub struct HostApi {
     pub max_stack: unsafe extern "C" fn(game: *mut c_void, item: u32) -> u32,
     /// Moves one stack into the entity's inventory; returns the number of items moved.
     pub move_stack: unsafe extern "C" fn(game: *mut c_void, slot: u64, to: u32) -> u32,
+    // v4: the world, usable in any callback
+    /// Writes up to `cap` player entity ids; returns how many players are in the world.
+    pub players: unsafe extern "C" fn(out: *mut u32, cap: usize) -> usize,
+    /// Position in metres into `out[0..3]`; false if the entity has none.
+    pub position: unsafe extern "C" fn(entity: u32, out: *mut f64) -> bool,
+    /// Moves an entity (a player sees itself there right away).
+    pub teleport: unsafe extern "C" fn(entity: u32, x: f64, y: f64, z: f64) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -150,6 +158,11 @@ pub struct Host<'a> {
 }
 
 impl Host<'_> {
+    /// The world: players, positions, teleporting.
+    pub fn world(&self) -> World<'_> {
+        World { api: self.api }
+    }
+
     /// Sends a JSON message to a client addon (route it with `"mod"`; `"ui"` messages open windows).
     pub fn send(&mut self, client: u64, message: &Value) {
         let text = message.to_string();
@@ -162,6 +175,42 @@ impl Host<'_> {
     }
 }
 
+/// The world, from any callback (host v4; older hosts answer nothing).
+pub struct World<'a> {
+    api: &'a HostApi,
+}
+
+impl World<'_> {
+    fn available(&self) -> bool {
+        self.api.version >= 4
+    }
+
+    /// Entity ids of the players in the world.
+    pub fn players(&self) -> Vec<u32> {
+        if !self.available() {
+            return Vec::new();
+        }
+        let mut out = vec![0u32; 64];
+        let n = unsafe { (self.api.players)(out.as_mut_ptr(), out.len()) };
+        out.truncate(n.min(64));
+        out
+    }
+
+    /// Position in metres (x, y up, z).
+    pub fn position(&self, entity: u32) -> Option<[f64; 3]> {
+        if !self.available() {
+            return None;
+        }
+        let mut out = [0f64; 3];
+        unsafe { (self.api.position)(entity, out.as_mut_ptr()) }.then_some(out)
+    }
+
+    /// Moves an entity to `to` (metres); a player sees itself there right away.
+    pub fn teleport(&self, entity: u32, to: [f64; 3]) -> bool {
+        self.available() && unsafe { (self.api.teleport)(entity, to[0], to[1], to[2]) }
+    }
+}
+
 /// Game access inside an inventory callback.
 pub struct Game<'a> {
     api: &'a HostApi,
@@ -169,6 +218,10 @@ pub struct Game<'a> {
 }
 
 impl Game<'_> {
+    pub fn world(&self) -> World<'_> {
+        World { api: self.api }
+    }
+
     /// Every inventory slot of an entity (pages x 8 slots, empty ones included).
     pub fn slots(&self, entity: u32) -> Vec<Slot> {
         let mut out = vec![Slot::default(); 256];
@@ -220,6 +273,10 @@ pub struct Events<'a> {
 }
 
 impl Events<'_> {
+    pub fn world(&self) -> World<'_> {
+        World { api: self.api }
+    }
+
     pub fn send(&self, client: u64, message: &Value) {
         let text = message.to_string();
         unsafe { (self.api.send)(std::ptr::null_mut(), client, text.as_ptr(), text.len()) }
@@ -391,11 +448,20 @@ pub mod testing {
     unsafe extern "C" fn move_stack(_: *mut c_void, _: u64, _: u32) -> u32 {
         0
     }
+    unsafe extern "C" fn players(_: *mut u32, _: usize) -> usize {
+        0
+    }
+    unsafe extern "C" fn position(_: u32, _: *mut f64) -> bool {
+        false
+    }
+    unsafe extern "C" fn teleport(_: u32, _: f64, _: f64, _: f64) -> bool {
+        false
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport },
                 sent: Box::default(),
             }
         }

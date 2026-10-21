@@ -44,6 +44,11 @@ pub fn end_frame() {
 fn state() -> Value {
     let mut state = crate::ui::snapshot();
     state["slots"] = Value::Array(SLOTS.lock().unwrap().1.clone());
+    // the session survives a lost connection until a new one is made: the client only ticks
+    // in a world, so a recent tick is what "in the world" means
+    let tick = crate::link::since_last_tick();
+    state["last_tick_ms"] = json!(tick);
+    state["in_world"] = json!(crate::link::connected() && tick.is_some_and(|ms| ms < 2000));
     state["connected"] = crate::link::connected().into();
     state["server_mods"] = Value::Array(crate::link::server_mods());
     state["mouse"] = json!(crate::native::mouse_pos());
@@ -56,7 +61,21 @@ fn answer(request: &str) -> Value {
     match request.get("cmd").and_then(Value::as_str) {
         Some("state") => state(),
         Some("ping") => json!({ "pong": true }),
-        _ => json!({ "error": "unknown command; use state or ping" }),
+        // a message to the server, as if a mod's UI had sent it; the reply is logged
+        Some("send") => match request.get("message") {
+            Some(message) => {
+                crate::link::send(message.clone());
+                json!({ "sent": true })
+            }
+            None => json!({ "error": "send needs a message" }),
+        },
+        Some("log") => {
+            let n = request.get("lines").and_then(Value::as_u64).unwrap_or(20) as usize;
+            let text = std::fs::read_to_string(chestsort_common::game_dir().join("shroudlink_client.log")).unwrap_or_default();
+            let lines: Vec<&str> = text.lines().rev().take(n).collect();
+            json!({ "lines": lines.into_iter().rev().collect::<Vec<_>>() })
+        }
+        _ => json!({ "error": "unknown command; use state, ping, send or log" }),
     }
 }
 

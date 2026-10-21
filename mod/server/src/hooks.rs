@@ -23,8 +23,8 @@ pub enum Feature {
     Inventory,
     /// inventory events for "move all"
     MoveAll,
-    /// the self-test's game context
-    SelfTest,
+    /// a game context outside inventory hooks (self-test, actions like teleport)
+    WorldContext,
     /// game events (died, picked up, levelled up, built …) for mods
     GameEvents,
 }
@@ -35,7 +35,7 @@ impl Feature {
             Feature::Channel => "channel",
             Feature::Inventory => "inventory",
             Feature::MoveAll => "move_all",
-            Feature::SelfTest => "selftest",
+            Feature::WorldContext => "world_context",
             Feature::GameEvents => "game_events",
         }
     }
@@ -62,13 +62,13 @@ pub const POINTS: &[HookPoint] = &[
     // FUN_1401ad940(out, ctx, from, to, mode, flag): move all
     HookPoint { name: "move_all", feature: Feature::MoveAll, signature: "48 89 4C 24 08 55 53 56 57 41 54 41 56 48 8D AC 24 A8 FC FF FF" },
     // FUN_14019c480(system): world system that builds an inventory context once after loading
-    HookPoint { name: "boot_system", feature: Feature::SelfTest, signature: "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D AC 24 30 8E FF FF" },
+    HookPoint { name: "boot_system", feature: Feature::WorldContext, signature: "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D AC 24 30 8E FF FF" },
     // FUN_1401b2bf0(ctx, descriptor): fills an inventory context
-    HookPoint { name: "build_ctx", feature: Feature::SelfTest, signature: "C6 81 A8 71 00 00 00 48 8B 42 08 48 89 01" },
+    HookPoint { name: "build_ctx", feature: Feature::WorldContext, signature: "C6 81 A8 71 00 00 00 48 8B 42 08 48 89 01" },
     // FUN_1406ba490(scheduler): dispatches the frame's game events and empties the queues
     HookPoint { name: "dispatch_events", feature: Feature::GameEvents, signature: "40 56 41 55 41 56 48 83 EC 40 48 8B 31 45 33 ED 4C 8B F1 4C 39 A9" },
     // FUN_14003aba0(ctx): zeroes an inventory context
-    HookPoint { name: "init_ctx", feature: Feature::SelfTest, signature: "33 D2 33 C0 48 89 11 48 89 51 08 48 89 51 10 48 89 51 18 48 89 51 20 48 89 51 28 48 89 51 30 48 89 51 38 48 89 51 40 48 89 51 48 48 89 51 50 48 89 51 58 48 89 51 60 48 89 51 68 48 89 51 70 48 89 51 78 48 89 81 80 00 00 00" },
+    HookPoint { name: "init_ctx", feature: Feature::WorldContext, signature: "33 D2 33 C0 48 89 11 48 89 51 08 48 89 51 10 48 89 51 18 48 89 51 20 48 89 51 28 48 89 51 30 48 89 51 38 48 89 51 40 48 89 51 48 48 89 51 50 48 89 51 58 48 89 51 60 48 89 51 68 48 89 51 70 48 89 51 78 48 89 81 80 00 00 00" },
 ];
 
 pub struct Registry {
@@ -120,7 +120,7 @@ pub fn disable(feature: Feature, reason: String) {
     registry().disabled.insert(feature, reason);
 }
 
-pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::SelfTest];
+pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::WorldContext];
 
 /// The features that work, for addons and mods (none before the scan, e.g. in unit tests).
 pub fn working() -> Vec<&'static str> {

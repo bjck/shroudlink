@@ -269,7 +269,7 @@ impl Game {
 /// Raw ECS entity record: archetype at +0x18, chunk base at +0x20, row at +0x30.
 /// Archetypes store a component bitmask at +0, per-component array offsets at
 /// +0x84 and element sizes at +0xa84 (both u16, indexed by component type).
-pub struct EntityRecord(*mut u8);
+pub struct EntityRecord(pub *mut u8);
 
 pub const MAX_COMPONENT_TYPES: u16 = 0x420;
 

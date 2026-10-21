@@ -2,6 +2,11 @@
 addon reports on screen (needs a `shroudlink_automation` file in the game folder).
 
 usage:
+  python gamectl.py launch                   start the game straight into the local server
+  python gamectl.py quit                     close the game
+  python gamectl.py rejoin                   quit, then launch
+  python gamectl.py join                     game already started with boot connect: confirm, wait
+  python gamectl.py ensure                   in the world on the local server, rejoining if needed
   python gamectl.py state                    what the addon sees (JSON)
   python gamectl.py key <KEY>                tap a key (letter, ESC, TAB, ENTER, F1..)
   python gamectl.py click <x> <y>            left click at UI units (1080 high)
@@ -9,6 +14,8 @@ usage:
   python gamectl.py shot <out.png>           screenshot of the game window
   python gamectl.py test locks               L on a backpack slot: rim on, rim off
   python gamectl.py test search              item search in a chest screen (one must be open)
+  python gamectl.py goto <name>              teleport to the chest with that name, face it, open it
+  python gamectl.py test all [name]          ensure in world, goto the chest (default "food"), test chest
   python gamectl.py test chest               stand in front of a chest: open it, search, lock a
                                              slot, quick stack (hold R), check the lock held
 
@@ -64,6 +71,11 @@ class Addon:
 
     def state(self):
         return self.ask("state")
+
+    def ask_send(self, message):
+        """Has the addon send `message` to the server."""
+        self.sock.sendall((json.dumps({"cmd": "send", "message": message}) + "\n").encode())
+        return json.loads(self.reader.readline())
 
     def wait(self, what, check, timeout=5.0):
         end = time.time() + timeout
@@ -149,6 +161,31 @@ def click(x, y):
     time.sleep(0.2)
 
 
+MOUSEEVENTF_MOVE = 0x0001
+
+
+def turn(dx, dy=0, steps=10):
+    """Turns the camera with relative mouse movement (raw input), in small steps."""
+    focus()
+    for _ in range(steps):
+        send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(int(dx / steps), int(dy / steps), 0, MOUSEEVENTF_MOVE, 0, 0))))
+        time.sleep(0.02)
+    time.sleep(0.3)
+
+
+def ctrl_click(x, y):
+    """Ctrl + left click (in inventories: move between action bar and backpack)."""
+    hover(x, y)
+    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(0x11, 0x1D, 0, 0, 0))))
+    time.sleep(0.05)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0))))
+    time.sleep(0.08)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0))))
+    time.sleep(0.05)
+    send(INPUT(INPUT_KEYBOARD, _U(ki=KEYBDINPUT(0x11, 0x1D, KEYEVENTF_KEYUP, 0, 0))))
+    time.sleep(0.3)
+
+
 def shot(out):
     import subprocess
     subprocess.run([sys.executable, str(Path(__file__).with_name("shot.py")), out], check=True)
@@ -216,12 +253,32 @@ def test_chest(addon):
     key("L")
     addon.wait("the rim", lambda s: any(x["slot"] == slot["slot"] and x["mark"] == "rim" for x in s["slots"]))
     print(f"PASS L locks slot {slot['position']} (item {slot['item']})")
+    # the action bar is the last two pages the backpack panel draws
+    def action_bar(state):
+        last = max(x["position"][0] for x in state["slots"])
+        return sorted((x["position"], x["item"]) for x in state["slots"] if x["position"][0] >= last - 1 and x["item"])
+
+    bar_before = action_bar(addon.state())
     hover(960, 60)  # away from the slots, so R is not taken as a slot action
     key("R", hold=1.2)
     time.sleep(1.0)
-    after = next((x for x in addon.state()["slots"] if x["slot"] == slot["slot"]), None)
+    after_state = addon.state()
+    after = next((x for x in after_state["slots"] if x["slot"] == slot["slot"]), None)
     assert after and after["item"] == slot["item"], f"the locked item left the slot: {after}"
     print("PASS hold R (quick stack) keeps the locked item")
+    assert action_bar(after_state) == bar_before, f"the action bar changed: {bar_before} -> {action_bar(after_state)}"
+    print(f"PASS the action bar stayed ({len(bar_before)} item(s))")
+    # tap R: move all; locked slot and action bar stay, the rest goes into the chest
+    hover(960, 60)
+    key("R", hold=0.08)
+    time.sleep(1.5)
+    after_state = addon.state()
+    after = next((x for x in after_state["slots"] if x["slot"] == slot["slot"]), None)
+    assert after and after["item"] == slot["item"], f"move all took the locked item: {after}"
+    assert action_bar(after_state) == bar_before, f"move all changed the action bar: {bar_before} -> {action_bar(after_state)}"
+    print("PASS tap R (move all) keeps the locked item and the action bar")
+    key("F", hold=0.4)  # take all back from the chest
+    time.sleep(1.5)
     hover(*centre(slot["rect"]))
     key("L")
     addon.wait("the rim to go", lambda s: any(x["slot"] == slot["slot"] and x["mark"] is None for x in s["slots"]))
@@ -231,12 +288,152 @@ def test_chest(addon):
     print("PASS Esc closes the chest")
 
 
+ROOT = Path(__file__).resolve().parents[2]
+STEAM_APP = "1203620"
+
+
+def steam_exe():
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as k:
+        return winreg.QueryValueEx(k, "SteamExe")[0]
+
+
+def local_server():
+    """Address and admin password of the local test server (server/enshrouded_server.json)."""
+    cfg = json.loads((ROOT / "server" / "enshrouded_server.json").read_text(encoding="utf-8"))
+    password = next((g["password"] for g in cfg.get("userGroups", []) if g["name"] == "Admin"), "")
+    return f"127.0.0.1:{cfg.get('queryPort', 15637)}", password
+
+
+def running():
+    import subprocess
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq enshrouded.exe", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
+    return "enshrouded.exe" in out.lower()
+
+
+def quit_game(timeout=60):
+    import subprocess
+    if not running():
+        return
+    hwnd = user32.FindWindowW(None, "Enshrouded")
+    if hwnd:
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE: the game saves and exits
+    end = time.time() + timeout
+    while running() and time.time() < end:
+        time.sleep(1)
+    if running():
+        subprocess.run(["taskkill", "/IM", "enshrouded.exe", "/F"], capture_output=True)
+        time.sleep(3)
+    print("game closed")
+
+
+def launch(address=None, password=None, timeout=240):
+    """Starts the game through Steam with the boot connect arguments and waits until the
+    addon reports a connection to the server and the world (screen 0x01)."""
+    import subprocess
+    if running():
+        raise SystemExit("the game is running already (use rejoin)")
+    default_address, default_password = local_server()
+    address, password = address or default_address, password or default_password
+    subprocess.Popen([steam_exe(), "-applaunch", STEAM_APP, "+connect", address, "+password", password])
+    print(f"launching, joining {address}")
+    join(timeout)
+
+
+def join(timeout=240):
+    """Waits until the addon reports the world; confirms the boot connect dialog meanwhile."""
+    end = time.time() + timeout
+    confirmed_at = 0.0
+    while time.time() < end:
+        try:
+            s = Addon().state()
+        except OSError:
+            s = None  # the addon starts with the game
+        if s and s.get("in_world", s["connected"]) and s["screen"] == 0x01:
+            print("in the world, addon connected")
+            return
+        # boot connect stops at "About to join: … JOIN SESSION" (already selected): confirm it
+        # until the addon reports a session; the addon is up long before the menu
+        if s and not s["connected"] and s["screen"] == 0 and time.time() - confirmed_at > 6 and user32.FindWindowW(None, "Enshrouded"):
+            key("ENTER")
+            confirmed_at = time.time()
+        time.sleep(2)
+    raise SystemExit("the game did not reach the world in time")
+
+
+def ensure_in_world():
+    """In the world on the local server, whatever state the game is in (else rejoin)."""
+    try:
+        s = Addon().state()
+        if s.get("in_world") and s["screen"] == 0x01:
+            return
+    except OSError:
+        pass
+    print("not in the world: rejoining")
+    quit_game()
+    launch()
+
+
+SERVER_LOG = ROOT / "server" / "shroudlink.log"
+
+
+def server_debug(addon, message, reply_tag, timeout=8.0):
+    """Sends a core debug command (the local server needs a `shroudlink_probe` file) and
+    returns the JSON it logged after `reply_tag:` in shroudlink.log."""
+    start = SERVER_LOG.stat().st_size
+    addon.ask_send(message)
+    end = time.time() + timeout
+    while time.time() < end:
+        with open(SERVER_LOG, "rb") as f:
+            f.seek(start)
+            for line in f.read().decode("utf-8", "replace").splitlines():
+                if f"{reply_tag}: " in line:
+                    return json.loads(line.split(f"{reply_tag}: ", 1)[1])
+        time.sleep(0.3)
+    raise AssertionError(f"no {reply_tag} reply in the server log")
+
+
+def goto_chest(addon, name, distance=1.7, steps=24, step=400):
+    """Teleports the player next to the chest called `name` (or with that entity id) and
+    turns the camera until E opens it."""
+    found = server_debug(addon, {"mod": "shroudlink", "op": "debug_inventories", "radius": 200}, "debug_inventories")
+    chests = [c for c in found if (c["name"] or "").lower() == name.lower() or str(c["entity"]) == name]
+    assert chests, f"no chest named '{name}' near the player"
+    x, y, z = chests[0]["position"]
+    addon.ask_send({"mod": "shroudlink", "op": "debug_teleport", "x": x, "y": y + 0.2, "z": z + distance})
+    time.sleep(1.5)
+    turn(0, 150)  # look a little down: chests are low
+    for _ in range(steps):
+        key("E")
+        time.sleep(1.0)
+        screen = addon.state()["screen"]
+        if screen in CHEST_SCREENS:
+            print(f"PASS at chest '{name}' ({chests[0]['entity']})")
+            return
+        if screen != 0x01:
+            key("ESC")  # something else opened (an altar, a crafting station)
+            time.sleep(0.6)
+        turn(step)
+    raise AssertionError(f"could not face chest '{name}'")
+
+
 def main():
     args = sys.argv[1:]
     if not args:
         raise SystemExit(__doc__)
     cmd = args[0]
-    if cmd == "state":
+    if cmd == "launch":
+        launch(*args[1:3])
+    elif cmd == "ensure":
+        ensure_in_world()
+    elif cmd == "join":
+        join()
+    elif cmd == "quit":
+        quit_game()
+    elif cmd == "rejoin":
+        quit_game()
+        launch(*args[1:3])
+    elif cmd == "state":
         print(json.dumps(Addon().state(), indent=1))
     elif cmd == "key":
         key(args[1])
@@ -246,6 +443,13 @@ def main():
         hover(float(args[1]), float(args[2]))
     elif cmd == "shot":
         shot(args[1])
+    elif cmd == "goto":
+        goto_chest(Addon(), args[1])
+    elif cmd == "test" and args[1] == "all":
+        ensure_in_world()
+        addon = Addon()
+        goto_chest(addon, args[2] if len(args) > 2 else "food")
+        test_chest(addon)
     elif cmd == "test":
         {"locks": test_locks, "search": test_search, "chest": test_chest}[args[1]](Addon())
     else:

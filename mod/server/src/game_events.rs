@@ -46,8 +46,45 @@ pub fn records(bytes: &[u8]) -> Vec<(u32, &[u8])> {
     out
 }
 
+/// Research: with a `shroudlink_probe` file, log each player's component types at login.
+pub fn probing() -> bool {
+    static PROBE: OnceLock<bool> = OnceLock::new();
+    *PROBE.get_or_init(|| chestsort_common::game_dir().join("shroudlink_probe").exists())
+}
+
+/// Logins feed the core's player list; with a probe file the components are logged too.
+fn track_logins(events: &[(u32, &[u8])]) {
+    let login = shroudlink_sdk::events::hash_of("LoginEvent");
+    for (hash, data) in events {
+        if Some(*hash) != login || data.len() < 4 {
+            continue;
+        }
+        let player = u32::from_le_bytes(data[..4].try_into().unwrap());
+        crate::world::on_login(player);
+        if !probing() {
+            continue;
+        }
+        crate::world_ctx::with(|ctx| unsafe {
+            let game = crate::events::game();
+            if let Some(record) = game.entity_record(ctx, player) {
+                let list: Vec<String> = (0..crate::game::MAX_COMPONENT_TYPES).filter_map(|i| record.component(i).map(|(_, size)| format!("{i}:{size}"))).collect();
+                log!("probe: player {player} components {}", list.join(" "));
+                let words: Vec<String> = (0..0x20usize)
+                    .map(|i| {
+                        let w = *(ctx as *const usize).add(i);
+                        let idx = if w > 0x10000 { *(w as *const u16) as i64 } else { -1 };
+                        format!("{i:#x}={w:#x}/{idx}")
+                    })
+                    .collect();
+                log!("probe: ctx {}", words.join(" "));
+            }
+        });
+    }
+}
+
 unsafe extern "system" fn dispatch_hook(scheduler: *mut u8) {
-    if mods::has_game_event_subscribers() {
+    // always read: logins feed the player list
+    {
         let offset = *COUNT_OFFSET.get().unwrap();
         let count = *(scheduler.add(offset) as *const usize);
         let array = *(scheduler.add(offset - 8) as *const *const u8);
@@ -59,7 +96,9 @@ unsafe extern "system" fn dispatch_hook(scheduler: *mut u8) {
             if data.is_null() || used == 0 {
                 continue;
             }
-            events.extend(records(std::slice::from_raw_parts(data, used)).into_iter().filter(|(hash, _)| mods::wants_game_event(*hash)));
+            let all = records(std::slice::from_raw_parts(data, used));
+            track_logins(&all);
+            events.extend(all.into_iter().filter(|(hash, _)| mods::wants_game_event(*hash)));
         }
         if !events.is_empty() {
             mods::game_events(&events);

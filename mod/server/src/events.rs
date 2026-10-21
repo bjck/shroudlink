@@ -6,7 +6,8 @@
 //! - `FUN_1401ad940(out, ctx, from, to, mode, flag)`: move all (tap R / F).
 //!
 //! Per event: mods name slots to keep, mods move stacks themselves through the game
-//! API, then the game's own transfer runs with the kept stacks hidden from it.
+//! API, then the game's own transfer runs with the kept and the player's protected stacks
+//! (equipment, item in hand, action bar) hidden from it.
 
 use std::collections::HashSet;
 use std::ffi::c_void;
@@ -83,9 +84,10 @@ unsafe fn around(ctx: *mut Ctx, event: InventoryEvent, vanilla: impl FnOnce() ->
     ev.protected.extend(&kept);
     let moved = mods::transfer(&mut ev as *mut EventCtx as *mut c_void, &event);
 
-    // the game knows nothing about kept slots: it skips empty stacks, so kept stacks
-    // are shown to it as empty for the duration of the call
-    let hidden = hide(game, ctx, event.from, &kept);
+    // the game's own transfer skips empty stacks, so protected stacks are shown to it as
+    // empty for the duration of the call: what mods keep, and the player's equipment,
+    // item in hand and action bar (the game's own "move all" takes the action bar along)
+    let hidden = hide(game, ctx, event.from, &ev.protected);
     let result = vanilla();
     for (stack, count) in hidden {
         (*stack).count = count;

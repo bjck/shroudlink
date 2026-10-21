@@ -10,6 +10,7 @@
 //!   `steam_api64_o.dll` and all Steam calls are passed through to it. Proton
 //!   replaces Steam's own client DLL, so `crashhandler64.dll` is never probed there.
 
+mod components;
 mod events;
 mod game;
 mod game_events;
@@ -21,6 +22,8 @@ mod names;
 mod plugins;
 mod selftest;
 mod steam_proxy;
+mod world;
+mod world_ctx;
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,6 +111,9 @@ fn init() {
         return;
     }
     chestsort_common::log::init("shroudlink.log");
+    // a panic aborts the server (panic = "abort"); at least say where and why
+    std::panic::set_hook(Box::new(|info| log!("PANIC: {info}")));
+    unsafe { windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(on_crash)) };
     log!(
         "shroudlink server {} starting (loaded as {})",
         env!("CARGO_PKG_VERSION"),
@@ -138,6 +144,11 @@ fn init() {
         hooks::disable(hooks::Feature::MoveAll, "needs the inventory feature".into());
     }
     names::start();
+    if hooks::available(hooks::Feature::WorldContext) {
+        if let Err(e) = world_ctx::install() {
+            hooks::disable(hooks::Feature::WorldContext, e);
+        }
+    }
     selftest::install();
     if hooks::available(hooks::Feature::GameEvents) {
         if let Err(e) = game_events::install() {
@@ -151,6 +162,23 @@ fn init() {
         }
     }
     hooks::report(&module);
+}
+
+/// The dedicated server has no crash handler (and ours is a stub), so a crash ends the
+/// process silently: log what and where first.
+unsafe extern "system" fn on_crash(info: *const windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS) -> i32 {
+    let record = &*(*info).ExceptionRecord;
+    let addr = record.ExceptionAddress as usize;
+    let base = Module::main().map_or(0, |m| m.base);
+    let ours = DllMain as *const () as usize;
+    let place = if addr >= base && addr < base + 0x4000000 { format!("game +{:#x}", addr - base) } else { format!("{addr:#x} (shroudlink DllMain at {ours:#x})") };
+    log!(
+        "CRASH: exception {:#010x} at {place}, data [{:#x}, {:#x}]",
+        record.ExceptionCode as u32,
+        record.ExceptionInformation[0],
+        record.ExceptionInformation[1]
+    );
+    0 // EXCEPTION_CONTINUE_SEARCH: let the process end as it would have
 }
 
 fn own_file_name() -> Option<String> {
