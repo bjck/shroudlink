@@ -12,9 +12,14 @@
 //! That context exists only while a program runs, so requests are queued and applied from
 //! inside `getSelf` (`FUN_140182290`), a native nearly every program calls: with the
 //! running program's context and our own arguments, the same way a program would.
+//!
+//! Buffs that items keep up last only a moment (the Ring of Light's: 0.3 s, `keen::Time`
+//! is in nanoseconds) and are re-applied by the item's program every 0.1 s. A kept buff
+//! is re-applied the same way, every [`REAPPLY`], until its time is up.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use chestsort_common::log;
 use retour::GenericDetour;
@@ -31,8 +36,13 @@ unsafe impl Send for Hooks {}
 unsafe impl Sync for Hooks {}
 
 static HOOKS: OnceLock<Hooks> = OnceLock::new();
-static PENDING: AtomicBool = AtomicBool::new(false);
-static QUEUE: Mutex<Vec<Request>> = Mutex::new(Vec::new());
+/// buffs to apply or keep up
+static KEPT: Mutex<Vec<Kept>> = Mutex::new(Vec::new());
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// milliseconds since [`start`] when the next buff is due
+static NEXT_DUE: AtomicU64 = AtomicU64::new(0);
+/// how often a kept buff is applied again (what items do for their own buffs)
+const REAPPLY: Duration = Duration::from_millis(100);
 /// getSelf calls seen, for the self-test (does the hook run at all).
 static CALLS: AtomicU64 = AtomicU64::new(0);
 
@@ -53,6 +63,22 @@ pub struct Request {
     pub buff: [u8; 16],
 }
 
+struct Kept {
+    request: Request,
+    /// re-applied until then; None: applied once
+    until: Option<Instant>,
+    next: Instant,
+}
+
+fn start() -> Instant {
+    static START: OnceLock<Instant> = OnceLock::new();
+    *START.get_or_init(Instant::now)
+}
+
+fn millis(at: Instant) -> u64 {
+    at.saturating_duration_since(start()).as_millis() as u64
+}
+
 pub fn install() -> Result<(), String> {
     unsafe {
         let get_self = GenericDetour::<NativeFn>::new(std::mem::transmute::<usize, NativeFn>(hooks::address("impact_get_self")?), get_self_hook).map_err(|e| e.to_string())?;
@@ -63,13 +89,19 @@ pub fn install() -> Result<(), String> {
     Ok(())
 }
 
-/// Queues a buff for `target`; it is applied the next time any impact program runs.
-pub fn apply(request: Request) -> bool {
+/// Applies a buff to `request.target` and keeps it up for `keep` (zero: applied once, with
+/// its own lifetime). A new call for the same target and buff replaces the old one, so
+/// `keep` zero also ends a kept buff. Applied the next time any impact program runs.
+pub fn apply(request: Request, keep: Duration) -> bool {
     if HOOKS.get().is_none() {
         return false;
     }
-    QUEUE.lock().unwrap().push(request);
-    PENDING.store(true, Ordering::Release);
+    let now = Instant::now();
+    let mut kept = KEPT.lock().unwrap();
+    kept.retain(|k| k.request != request);
+    kept.push(Kept { request, until: (!keep.is_zero()).then(|| now + keep), next: now });
+    NEXT_DUE.store(millis(now), Ordering::Release);
+    ACTIVE.store(true, Ordering::Release);
     true
 }
 
@@ -81,13 +113,24 @@ unsafe extern "system" fn get_self_hook(out: *mut u8, args: *const *const u32, v
     let hooks = HOOKS.get().unwrap();
     let result = hooks.get_self.call(out, args, vm);
     CALLS.fetch_add(1, Ordering::Relaxed);
-    // a plain load first: this runs on every program step, on several threads
-    if PENDING.load(Ordering::Relaxed) && PENDING.swap(false, Ordering::AcqRel) {
-        let requests = std::mem::take(&mut *QUEUE.lock().unwrap());
-        for request in requests {
-            if !call_apply_buff(hooks.apply_buff, vm, &request) {
-                log!("buffs: buff {} refused for entity {}", shroudlink_sdk::guid_hash(&request.buff), request.target);
+    // plain loads first: this runs on every program step, on several threads
+    if ACTIVE.load(Ordering::Relaxed) && millis(Instant::now()) >= NEXT_DUE.load(Ordering::Relaxed) {
+        if let Ok(mut kept) = KEPT.try_lock() {
+            let now = Instant::now();
+            for k in kept.iter_mut().filter(|k| k.next <= now) {
+                let applied = call_apply_buff(hooks.apply_buff, vm, &k.request);
+                if !applied || (crate::game_events::probing() && k.until.is_none()) {
+                    log!("buffs: buff {} for entity {}: {}", shroudlink_sdk::guid_hash(&k.request.buff), k.request.target, if applied { "applied" } else { "refused" });
+                }
+                // a refused buff (entity gone, unknown buff) is dropped below
+                if !applied {
+                    k.until = None;
+                }
+                k.next = now + REAPPLY;
             }
+            kept.retain(|k| k.until.is_some_and(|u| u > now));
+            ACTIVE.store(!kept.is_empty(), Ordering::Release);
+            NEXT_DUE.store(kept.iter().map(|k| millis(k.next)).min().unwrap_or(u64::MAX), Ordering::Release);
         }
     }
     result

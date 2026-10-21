@@ -153,6 +153,22 @@ pub fn read_component(entity: u32, type_hash: u32, out: &mut [u8]) -> usize {
     .unwrap_or(0)
 }
 
+/// Research: entity ids below `max` that have a component of type `type_hash`, with its
+/// first bytes.
+pub fn scan_component(type_hash: u32, max: u32) -> Vec<(u32, Vec<u8>)> {
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        (1..max)
+            .filter_map(|entity| {
+                let record = game.entity_record(ctx, entity)?;
+                let (addr, size) = components::of(ctx, &record, type_hash)?;
+                Some((entity, std::slice::from_raw_parts(addr, (size as usize).min(32)).to_vec()))
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// Overwrites an entity's component of type `type_hash`; `data` must be its exact size.
 pub fn write_component(entity: u32, type_hash: u32, data: &[u8]) -> bool {
     world_ctx::with(|ctx| unsafe {
@@ -258,10 +274,11 @@ pub unsafe extern "C" fn api_move_stack(from: u32, slot: u64, to: u32) -> u32 {
     move_stack(from, slot, to)
 }
 
-pub unsafe extern "C" fn api_apply_buff(entity: u32, buff: *const u8) -> bool {
+pub unsafe extern "C" fn api_apply_buff(entity: u32, buff: *const u8, seconds: f64) -> bool {
     let mut guid = [0u8; 16];
     std::ptr::copy_nonoverlapping(buff, guid.as_mut_ptr(), 16);
-    crate::buffs::apply(crate::buffs::Request { target: entity, buff: guid })
+    let keep = if seconds.is_finite() { seconds.clamp(0.0, 3600.0) } else { 0.0 };
+    crate::buffs::apply(crate::buffs::Request { target: entity, buff: guid }, std::time::Duration::from_secs_f64(keep))
 }
 
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {

@@ -205,10 +205,31 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
                 let buff = message.get("buff").and_then(Value::as_str).and_then(shroudlink_sdk::guid_bytes);
                 let player = crate::world::player_of(client.0).or_else(|| crate::world::players().first().copied());
                 let queued = match (buff, player) {
-                    (Some(buff), Some(target)) => crate::buffs::apply(crate::buffs::Request { target, buff }),
+                    (Some(buff), Some(target)) => {
+                        let keep = message.get("seconds").and_then(Value::as_f64).unwrap_or(0.0);
+                        crate::buffs::apply(crate::buffs::Request { target, buff }, std::time::Duration::from_secs_f64(keep.clamp(0.0, 3600.0)))
+                    }
                     _ => false,
                 };
                 log!("debug_buff: player {player:?}, queued {queued}, getSelf calls {}", crate::buffs::calls());
+            }
+            Some("debug_component") if crate::game_events::probing() => {
+                let name = message.get("type").and_then(Value::as_str).unwrap_or("");
+                let player = crate::world::player_of(client.0).or_else(|| crate::world::players().first().copied());
+                let mut out = vec![0u8; 4096];
+                let size = match (shroudlink_sdk::components::hash_of(name), player) {
+                    (Some(hash), Some(p)) => crate::world::read_component(p, hash, &mut out),
+                    _ => 0,
+                };
+                let words: Vec<u32> = out[..size.min(out.len())].chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+                log!("debug_component: {}", json!({ "type": name, "player": player, "size": size, "u32": words }));
+            }
+            Some("debug_scan") if crate::game_events::probing() => {
+                let name = message.get("type").and_then(Value::as_str).unwrap_or("");
+                let max = message.get("max").and_then(Value::as_u64).unwrap_or(20000) as u32;
+                let found = shroudlink_sdk::components::hash_of(name).map(|h| crate::world::scan_component(h, max)).unwrap_or_default();
+                let list: Vec<Value> = found.iter().map(|(e, b)| json!({ "entity": e, "u32": b.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect::<Vec<_>>() })).collect();
+                log!("debug_scan: {}", json!({ "type": name, "found": list }));
             }
             Some("debug_face") if crate::game_events::probing() => {
                 let yaw = message.get("yaw").and_then(Value::as_f64).unwrap_or(0.0);

@@ -1,7 +1,8 @@
 //! Lantern: a light around the player while the hands stay free for weapons. MODS ->
 //! Lantern switches it on and off. The light is the game's own: the hidden buff of the
-//! Ring of Light, which attaches a light effect to the chest. The server keeps applying
-//! it, and every client shows it with its own vanilla data, so nobody needs new files.
+//! Ring of Light, which attaches a light effect to the chest. The server keeps it up the
+//! way the ring does, and every client shows it with its own vanilla data, so nobody
+//! needs new files.
 //! Built only from the SDK: `player_of`, `apply_buff` and `on_tick`.
 
 use std::collections::HashMap;
@@ -12,9 +13,11 @@ use shroudlink_sdk::{export_mod, log, Host, Mod, Value};
 
 const ID: &str = "lantern";
 /// `BuffType` of the Ring of Light's visual (`Visuals_Ring_Of_Light`): slot Buff, apply
-/// type ResetTime, 30 s lifetime, a light effect on the chest.
+/// type ResetTime, 0.3 s lifetime (the ring re-applies it), a light effect on the chest.
 const LIGHT_BUFF: &str = "b2f8db72-a69d-43db-baf1-c69937ec0264";
-/// Well inside the buff's 30 s lifetime, so the light never flickers off.
+/// How long the server keeps the light up per request ...
+const KEEP: f64 = 30.0;
+/// ... and how often the request is renewed, well before it runs out.
 const REFRESH: Duration = Duration::from_secs(10);
 
 /// A player with the light on.
@@ -45,11 +48,12 @@ impl Lantern {
     }
 
     fn toggle(&mut self, host: &Host, client: u64) -> String {
-        if self.lit.remove(&client).is_some() {
-            return "The light fades within half a minute.".into();
+        if let Some(lit) = self.lit.remove(&client) {
+            host.world().apply_buff(lit.player, LIGHT_BUFF, 0.0);
+            return "Light off.".into();
         }
         let Some(player) = host.world().player_of(client) else { return "Unknown player: open a chest first.".into() };
-        if !host.world().apply_buff(player, LIGHT_BUFF) {
+        if !host.world().apply_buff(player, LIGHT_BUFF, KEEP) {
             return "This server cannot give lights (its shroudlink is too old, or the game changed).".into();
         }
         log!("lantern: light on for player {player}");
@@ -82,8 +86,10 @@ impl Mod for Lantern {
         host.send(client, &window.to_message());
     }
 
-    fn on_leave(&mut self, _host: &mut Host, client: u64) {
-        self.lit.remove(&client);
+    fn on_leave(&mut self, host: &mut Host, client: u64) {
+        if let Some(lit) = self.lit.remove(&client) {
+            host.world().apply_buff(lit.player, LIGHT_BUFF, 0.0);
+        }
         self.status.remove(&client);
     }
 
@@ -91,7 +97,7 @@ impl Mod for Lantern {
         let world = host.world();
         for lit in self.lit.values_mut() {
             if lit.applied.is_none_or(|t| t.elapsed() >= REFRESH) {
-                world.apply_buff(lit.player, LIGHT_BUFF);
+                world.apply_buff(lit.player, LIGHT_BUFF, KEEP);
                 lit.applied = Some(Instant::now());
             }
         }

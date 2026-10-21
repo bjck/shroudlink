@@ -14,17 +14,16 @@ the light. The torch takes the weapon hand, so a weapon cannot be out at the sam
 the visual) has `equipment.visualEntity = Visuals_Ring_Of_Light`
 (`1890618a-992e-46b1-ad68-51bd8bf5e3a0`). That template has no model, only an `Impact`
 whose program (`5867aa21-…`, variables `GetRoot`, `GetEntityParent`, `ResetRate`,
-`BuffType`) applies a buff to the wearer every 10 s:
+`BuffType`) applies a buff to the wearer every 0.1 s:
 
 | | |
 |---|---|
 | BuffType Guid | `b2f8db72-a69d-43db-baf1-c69937ec0264` (`BuffTypeId` 2348168016) |
-| slot / apply type | Buff / ResetTime, lifetime 30 s, hidden in the UI, not saved |
+| slot / apply type | Buff / ResetTime, lifetime 0.3 s (`keen::Time` is in nanoseconds), hidden in the UI, not saved |
 | `whileApplied` | VFX `826ea0d6-2181-4fea-8aba-3491cd40c39d` on the Chest slot, +0.57 m up, with light parameters |
 
 So wearing one of these rings already gives a light on the chest with both hands free.
-Found with an EML export script (`server/mods/lantern_dump`, not in the repo; `emm run
---export` on the local server's data).
+Found with an EML export script (`research/scripts/eml/lantern_dump`).
 
 ## Server-only lantern: applying that buff from a mod
 
@@ -40,17 +39,20 @@ impact VM (`server/src/buffs.rs`):
   layout (`ImpactVariable`, offset at +0xe), `vm+0x10` the data, `vm+0x30` the running
   program's context (its entity, component storages), valid only while it runs;
 - the core queues requests and runs `applyBuff(guid, target)` from inside `getSelf`, with
-  the running context and its own variables.
+  the running context and its own variables. A kept buff is re-applied every 0.1 s, as
+  the ring does (`World::apply_buff(entity, guid, seconds)`). The third native argument
+  is not a lifetime: with it set, no buff entity appears.
 
-The `lantern` mod (MODS -> Lantern) uses this through `World::apply_buff`, refreshing the
-buff every 10 s from `on_tick`. Switching off stops the refresh; the light ends with the
-buff's 30 s lifetime.
+The `lantern` mod (MODS -> Lantern) keeps the buff for 30 s and renews that every 10 s
+from `on_tick`; Light off ends it at once.
 
-**Not yet verified in game.** Without players no impact program runs on a dedicated
-server, so the self-test only shows that the hooks are found (`getSelf` 0 calls). To test:
-local server, a player in the world, then MODS -> Lantern -> Light on (or, with
-`shroudlink_probe`, `{"mod":"shroudlink","op":"debug_buff","buff":"b2f8db72-…"}`), and
-look for `buffs: … refused` in `shroudlink.log` and the light on the character.
+**Verified in game (2026-10-21, local server):** with the light on, a buff entity with
+`BuffComponent.buffTypeId` 2348168016 exists for as long as the light is on and is gone
+1.5 s after Light off. At night the grass around the character is lit, with the unmodified
+client (`docs/screenshots/lantern.jpg`, top: off, bottom: on). Without players no impact
+program runs on a dedicated server, so the self-test only checks that the hooks are found.
+Probe ops for this: `debug_buff` (`buff`, `seconds`), `debug_scan` (entities with a
+component type), `debug_component` (a player's component).
 
 ## Rejected: a new lantern item
 

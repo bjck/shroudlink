@@ -96,7 +96,7 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `inventories_near(entity, radius)` | entities with an inventory (chests, stations) around an entity; only the world around players is loaded |
 | `inventory(entity)` | every slot of any entity's inventory |
 | `move_stack(from, slot, to)` | moves a stack between two inventories outside any player action; a player's equipment, item in hand and action bar are never taken nor filled |
-| `apply_buff(entity, "guid")` | gives an entity a vanilla buff by the Guid of its `BuffType`, the way an item or spell would (core v5, experimental). Clients show its effects from their own data, so no client files are needed |
+| `apply_buff(entity, "guid", seconds)` | gives an entity a vanilla buff by the Guid of its `BuffType`, the way an item or spell would (core v5), and keeps it up for `seconds` (0: once; also ends a kept buff). Item buffs often last only 0.3 s on their own. Clients show its effects from their own data, so no client files are needed |
 
 `components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
 `mods/storage` shows everything in the chests around the player as one grid and fetches

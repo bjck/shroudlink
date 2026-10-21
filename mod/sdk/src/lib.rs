@@ -134,9 +134,9 @@ pub struct HostApi {
     /// Moves a stack between two inventories; returns the items moved.
     pub move_stack_between: unsafe extern "C" fn(from: u32, slot: u64, to: u32) -> u32,
     // v5
-    /// Queues a buff (`keen::Guid` of its `BuffType`, 16 bytes in memory order) for an
-    /// entity; false if the server cannot apply buffs.
-    pub apply_buff: unsafe extern "C" fn(entity: u32, buff: *const u8) -> bool,
+    /// Applies a buff (`keen::Guid` of its `BuffType`, 16 bytes in memory order) to an
+    /// entity and keeps it up for `seconds` (0: once); false if the server cannot apply buffs.
+    pub apply_buff: unsafe extern "C" fn(entity: u32, buff: *const u8, seconds: f64) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -306,13 +306,15 @@ impl World<'_> {
     }
 
     /// Gives an entity a buff of the game, by the Guid of its `BuffType`
-    /// ("b2f8db72-a69d-43db-baf1-c69937ec0264"). The game applies it the way an item or
-    /// spell would, with the buff's own lifetime: clients show its effects with their own
-    /// data, so any vanilla buff works without client changes. Applied within a frame;
-    /// false if the server cannot apply buffs or the Guid is malformed.
-    pub fn apply_buff(&self, entity: u32, buff: &str) -> bool {
+    /// ("b2f8db72-a69d-43db-baf1-c69937ec0264"), the way an item or spell would. Clients
+    /// show its effects with their own data, so any vanilla buff works without client
+    /// changes. `seconds` keeps it up that long (at most an hour), re-applied like an
+    /// equipped item does; many item buffs last only a fraction of a second on their own.
+    /// 0 applies it once, and also ends a buff kept up by an earlier call.
+    /// False if the server cannot apply buffs or the Guid is malformed.
+    pub fn apply_buff(&self, entity: u32, buff: &str, seconds: f64) -> bool {
         let Some(guid) = guid_bytes(buff) else { return false };
-        self.api.version >= 5 && unsafe { (self.api.apply_buff)(entity, guid.as_ptr()) }
+        self.api.version >= 5 && unsafe { (self.api.apply_buff)(entity, guid.as_ptr(), seconds) }
     }
 
     /// The player entity behind an addon session. Known once the player has opened a chest
@@ -619,7 +621,7 @@ pub mod testing {
     unsafe extern "C" fn move_stack_between(_: u32, _: u64, _: u32) -> u32 {
         0
     }
-    unsafe extern "C" fn apply_buff(_: u32, _: *const u8) -> bool {
+    unsafe extern "C" fn apply_buff(_: u32, _: *const u8, _: f64) -> bool {
         false
     }
 

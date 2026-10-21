@@ -69,6 +69,14 @@ Set a waypoint on the map (M, then right-click a spot), open **MODS → Travel**
 **Travel to the marker**. You land there right away, from anywhere, the shroud included.
 The server has to know which player you are first: open any chest once after joining.
 
+## Lantern (addon)
+
+![Lantern off and on](https://raw.githubusercontent.com/bjck/shroudlink/main/docs/screenshots/lantern.jpg)
+
+**MODS → Lantern → Light on** puts a light around your character, with both hands free
+for weapons and tools. It is the same light as the game's Ring of Light, without wearing
+the ring. **Light off** switches it off again; leaving the server switches it off too.
+
 ## Storage: all chests as one box (addon)
 
 **MODS → Storage** shows everything stored in the chests within 40 m of you as one grid,
