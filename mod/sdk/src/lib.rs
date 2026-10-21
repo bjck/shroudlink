@@ -99,6 +99,8 @@ pub struct HostApi {
     pub position: unsafe extern "C" fn(entity: u32, out: *mut f64) -> bool,
     /// Moves an entity (a player sees itself there right away).
     pub teleport: unsafe extern "C" fn(entity: u32, x: f64, y: f64, z: f64) -> bool,
+    /// The player entity of an addon session, 0 until the addon has identified itself.
+    pub player_of: unsafe extern "C" fn(client: u64) -> u32,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -208,6 +210,15 @@ impl World<'_> {
     /// Moves an entity to `to` (metres); a player sees itself there right away.
     pub fn teleport(&self, entity: u32, to: [f64; 3]) -> bool {
         self.available() && unsafe { (self.api.teleport)(entity, to[0], to[1], to[2]) }
+    }
+
+    /// The player entity behind an addon session. Known once the player has opened a chest
+    /// screen this session (the addon identifies itself with its backpack's pages).
+    pub fn player_of(&self, client: u64) -> Option<u32> {
+        if !self.available() {
+            return None;
+        }
+        Some(unsafe { (self.api.player_of)(client) }).filter(|&p| p != 0)
     }
 }
 
@@ -457,11 +468,14 @@ pub mod testing {
     unsafe extern "C" fn teleport(_: u32, _: f64, _: f64, _: f64) -> bool {
         false
     }
+    unsafe extern "C" fn player_of(_: u64) -> u32 {
+        0
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of },
                 sent: Box::default(),
             }
         }

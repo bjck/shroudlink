@@ -16,6 +16,38 @@ use crate::world_ctx;
 
 const UNITS_PER_METRE: f64 = 4_294_967_296.0;
 
+/// Addon session -> its player entity, learned from the backpack pages the addon reports.
+static CLIENTS: Mutex<Vec<(u64, u32)>> = Mutex::new(Vec::new());
+
+/// An addon reported its backpack pages: find the player whose inventory has them.
+pub fn identify(client: u64, pages: &[u32]) -> Option<u32> {
+    let player = world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        players().into_iter().find(|&p| {
+            let theirs: Vec<u32> = game.inventory_setup(ctx, p).map(|setup| game.pages(ctx, setup).pages().iter().map(|page| page.entity).filter(|&e| e != 0).collect()).unwrap_or_default();
+            if crate::game_events::probing() {
+                log!("world: player {p} has pages {theirs:?}, addon reported {pages:?}");
+            }
+            theirs.iter().any(|e| pages.contains(e))
+        })
+    })
+    .flatten()?;
+    let mut clients = CLIENTS.lock().unwrap();
+    clients.retain(|&(c, p)| c != client && p != player);
+    clients.push((client, player));
+    log!("world: client {client:016x} is player {player}");
+    Some(player)
+}
+
+pub fn forget_client(client: u64) {
+    CLIENTS.lock().unwrap().retain(|&(c, _)| c != client);
+}
+
+/// The player entity of an addon session, once it has identified itself.
+pub fn player_of(client: u64) -> Option<u32> {
+    CLIENTS.lock().unwrap().iter().find(|&&(c, _)| c == client).map(|&(_, p)| p)
+}
+
 /// Player entities seen logging in (LoginEvent); pruned when they stop being players.
 static PLAYERS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
@@ -127,4 +159,8 @@ pub unsafe extern "C" fn api_position(entity: u32, out: *mut f64) -> bool {
 
 pub unsafe extern "C" fn api_teleport(entity: u32, x: f64, y: f64, z: f64) -> bool {
     teleport(entity, [x, y, z])
+}
+
+pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {
+    player_of(client).unwrap_or(0)
 }

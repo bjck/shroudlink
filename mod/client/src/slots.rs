@@ -107,6 +107,8 @@ pub fn panel_done() {
         })
     });
     if let Some((pages, owners)) = changed {
+        // the core learns which player this addon belongs to from the backpack's pages
+        crate::link::send(json!({ "mod": "shroudlink", "op": "identify", "pages": pages }));
         for owner in owners {
             crate::link::send(FromClient::Layout { pages: pages.clone() }.to_message(&owner));
         }

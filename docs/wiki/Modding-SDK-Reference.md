@@ -80,6 +80,17 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 - Players without the addon cause events too: these are server events, not addon
   messages.
 
+## The world (any callback)
+
+`host.world()`, `game.world()` or `events.world()`; these need a core with HostApi v4.
+
+| Call | Returns |
+|---|---|
+| `players()` | entity ids of the players in the world |
+| `position(entity)` | position in metres `[x, y (up), z]` |
+| `teleport(entity, [x, y, z])` | moves it; a player sees itself there right away |
+| `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
+
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 
 | Call | Returns |

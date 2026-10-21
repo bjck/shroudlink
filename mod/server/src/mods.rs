@@ -147,6 +147,7 @@ pub(crate) fn join(host: &mut Host, client: ClientId) {
 }
 
 pub(crate) fn leave(host: &mut Host, client: ClientId) {
+    crate::world::forget_client(client.0);
     with_mods(|mods| mods.iter_mut().for_each(|m| m.on_leave(host, client)));
 }
 
@@ -163,9 +164,14 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("ping") => host.send(client, &json!({ "mod": "shroudlink", "op": "pong", "echo": message.get("echo") })),
             // a reloaded addon continues its session and wants the welcome again
             Some("hello_again") => join(host, client),
+            Some("identify") => {
+                let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
+                crate::world::identify(client.0, &pages);
+            }
             // test automation (only with a shroudlink_probe file): players, positions, teleport
             Some("debug_players") if crate::game_events::probing() => {
                 let players: Vec<Value> = crate::world::players().into_iter().map(|p| json!({ "entity": p, "position": crate::world::position(p) })).collect();
+                log!("debug_identity: {}", json!({ "client": format!("{:016x}", client.0), "player": crate::world::player_of(client.0) }));
                 log!("debug_players: {}", Value::Array(players.clone()));
                 host.send(client, &json!({ "mod": "shroudlink", "op": "debug_players", "players": players }));
             }

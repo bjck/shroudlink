@@ -77,9 +77,21 @@ screen on `127.0.0.1:47911`, only locally:
 checks the result through that interface:
 
 ```
+python research/scripts/gamectl.py test all     # fully automatic, see below
 python research/scripts/gamectl.py state        # what the addon sees
-python research/scripts/gamectl.py test chest   # stand in front of a chest first
+python research/scripts/gamectl.py ensure       # in the world on the local server (rejoins if needed)
+python research/scripts/gamectl.py goto food    # teleport to the chest named "food" and open it
 ```
+
+`test all` needs no one at the keyboard; the local server needs a `shroudlink_probe` file
+for the core's test commands:
+
+1. It makes sure the game is in the world. If not, it starts it through Steam with
+   `+connect` / `+password` and confirms "Join session".
+2. It teleports the character to the chest. It finds the camera direction by walking a
+   step with W and measuring the move on the server, then places the character with the
+   chest straight ahead of the camera.
+3. It runs the chest scenario.
 
 `test chest` opens the chest (E), tests the search (`/`, typing, Esc, Esc), locks a slot
 (L, rim), quick stacks (hold R), checks that the locked item stayed, unlocks it and closes

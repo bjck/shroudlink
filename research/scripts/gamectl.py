@@ -393,17 +393,37 @@ def server_debug(addon, message, reply_tag, timeout=8.0):
     raise AssertionError(f"no {reply_tag} reply in the server log")
 
 
-def goto_chest(addon, name, distance=1.7, steps=24, step=400):
-    """Teleports the player next to the chest called `name` (or with that entity id) and
-    turns the camera until E opens it."""
+def player_position(addon):
+    return server_debug(addon, {"mod": "shroudlink", "op": "debug_players"}, "debug_players")[0]["position"]
+
+
+def camera_direction(addon):
+    """Unit vector (x, z) the camera looks along: W walks the character that way."""
+    import math
+    before = player_position(addon)
+    key("W", hold=0.35)
+    time.sleep(0.6)
+    after = player_position(addon)
+    dx, dz = after[0] - before[0], after[2] - before[2]
+    length = math.hypot(dx, dz)
+    assert length > 0.2, f"W did not move the character ({length:.2f} m)"
+    return dx / length, dz / length
+
+
+def goto_chest(addon, name, distance=1.6):
+    """Teleports the player in front of the chest called `name` (or with that entity id),
+    with the chest straight ahead of the camera, and opens it with E."""
     found = server_debug(addon, {"mod": "shroudlink", "op": "debug_inventories", "radius": 200}, "debug_inventories")
     chests = [c for c in found if (c["name"] or "").lower() == name.lower() or str(c["entity"]) == name]
     assert chests, f"no chest named '{name}' near the player"
     x, y, z = chests[0]["position"]
-    addon.ask_send({"mod": "shroudlink", "op": "debug_teleport", "x": x, "y": y + 0.2, "z": z + distance})
-    time.sleep(1.5)
-    turn(0, 150)  # look a little down: chests are low
-    for _ in range(steps):
+    addon.ask_send({"mod": "shroudlink", "op": "debug_teleport", "x": x + 4, "y": y + 0.2, "z": z + 4})
+    time.sleep(1.2)
+    dx, dz = camera_direction(addon)
+    addon.ask_send({"mod": "shroudlink", "op": "debug_teleport", "x": x - dx * distance, "y": y + 0.2, "z": z - dz * distance})
+    time.sleep(1.2)
+    for pitch in (100, 100, 100):
+        turn(0, pitch)  # look further down step by step: chests are low
         key("E")
         time.sleep(1.0)
         screen = addon.state()["screen"]
@@ -411,10 +431,9 @@ def goto_chest(addon, name, distance=1.7, steps=24, step=400):
             print(f"PASS at chest '{name}' ({chests[0]['entity']})")
             return
         if screen != 0x01:
-            key("ESC")  # something else opened (an altar, a crafting station)
+            key("ESC")
             time.sleep(0.6)
-        turn(step)
-    raise AssertionError(f"could not face chest '{name}'")
+    raise AssertionError(f"could not open chest '{name}'")
 
 
 def main():
