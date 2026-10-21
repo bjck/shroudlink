@@ -5,6 +5,7 @@
 !/README.md
 !/.gitattributes
 !/LICENSE
+!/AGENTS.md
 
 !/mod/
 /mod/target/
