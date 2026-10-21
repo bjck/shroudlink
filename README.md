@@ -20,6 +20,10 @@ addon play normally. Ships with **chestsort**, the mod it was built for.
 - Item search in chests (`/`).
 - Lock backpack slots with `L` (gold rim): deposits never take locked items.
 
+**Search in chests** (`/`): items that don't match fade out, in your backpack and in the chest.
+
+![Chest screen with the search "gril" in the backpack panel: only grillable food stays visible](docs/screenshots/chest-search.jpg)
+
 | Find which chest an item belongs in | Locked slots (gold rim) stay in your backpack |
 |---|---|
 | ![Item search: "iron bar" belongs to Ores, with the chest names that work](docs/screenshots/item-search.jpg) | ![Backpack with locked slots marked by a gold rim](docs/screenshots/item-locks.jpg) |
