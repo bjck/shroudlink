@@ -4,7 +4,7 @@
   "Name a chest with one or more category words, e.g. 'Food, Wood' or 'Ores & Gems'. Case and plural 's' do not matter.",
   "words: extra chest-name words for a category (the category name itself always works).",
   "items: item debug names; '*' is a wildcard, e.g. 'Food_T1_*'. A leading '-' removes items, e.g. '-*_Seedling'.",
-  "Delete this file to get the defaults back. Problems are reported in chestsort.log."
+  "Delete this file to get the defaults back. Problems are reported in shroudlink.log."
  ],
  "categories": {
   "Alchemy": {

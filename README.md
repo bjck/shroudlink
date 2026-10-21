@@ -28,6 +28,9 @@ addon play normally. Ships with **chestsort**, the mod it was built for.
 |---|---|
 | ![Item search: "iron bar" belongs to Ores, with the chest names that work](docs/screenshots/item-search.jpg) | ![Backpack with locked slots marked by a gold rim](docs/screenshots/item-locks.jpg) |
 
+## Documentation
+The wiki pages live in [`docs/wiki/`](docs/wiki/Home.md): for players, server owners and mod developers.
+
 ## Downloads
 See the releases: `shroudlink-client.zip` (players) and `chestsort-enshrouded.zip`
 (server owner: mod, update script, data patches).
