@@ -14,6 +14,8 @@
 //! server -> client  `{"mod":"ui","op":"slot_keys","owner":"chestsort","keys":[{"key":"L","label":"Lock"}]}`
 //!                   `{"mod":"ui","op":"marks","owner":"chestsort","marks":[{"slots":[...],"style":"rim"}]}`
 //!                   `{"mod":"ui","op":"store","owner":"chestsort","data":{...}}`
+//!                   `{"mod":"ui","op":"section","owner":"hello","id":"wave","nodes":[...]}`
+//!                   `{"mod":"ui","op":"notify","owner":"hello","text":"..."}`
 //! client -> server  `{"mod":"chestsort","op":"slot_key","key":"L","slot":..,"position":[page,index],"item":..}`
 //!                   `{"mod":"chestsort","op":"stored","data":{...}}`   after the welcome, if stored
 //!                   `{"mod":"chestsort","op":"layout","pages":[...]}`  backpack page entities in display order
@@ -94,6 +96,12 @@ pub enum ToClient {
     Marks { owner: String, marks: Vec<Mark> },
     /// Keeps `data` on the player's PC for this server; it comes back as `stored` on every join.
     Store { owner: String, data: serde_json::Value },
+    /// Rows the mod adds to the chest screen's backpack panel, below its title (where the
+    /// item search sits). Events come back as `ui_event` with `window` = `id`; no nodes
+    /// removes the section.
+    Section { owner: String, id: String, nodes: Vec<Node> },
+    /// A short message shown on the HUD for a few seconds.
+    Notify { owner: String, text: String },
 }
 
 /// A message the addon sends to a mod about inventory slots.

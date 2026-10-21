@@ -5,6 +5,7 @@
 //! (inventory / chest screens); otherwise a small status line sits on the HUD.
 
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use chestsort_common::log;
 use serde_json::Value;
@@ -23,10 +24,20 @@ pub struct OpenWindow {
 pub struct UiState {
     pub windows: Vec<OpenWindow>,
     pub menu: Vec<(String, MenuEntry)>,
+    /// rows mods add to the chest screen's backpack panel: (owner, id, nodes)
+    sections: Vec<(String, String, Vec<Node>)>,
+    /// HUD messages and when they arrived
+    notes: Vec<(String, Instant)>,
     last_screen: u8,
 }
 
-pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), last_screen: 0 });
+pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), last_screen: 0 });
+
+/// How long a notification stays, and how many are shown at once.
+const NOTE_SECONDS: u64 = 6;
+const NOTES_MAX: usize = 4;
+/// Width of mod sections in the backpack panel (the search field's row).
+const SECTION_WIDTH: f32 = 530.0;
 
 /// Gameplay without a menu; every other screen (journal 0x04, inventories, ...) shows a cursor.
 const SCREEN_GAMEPLAY: u8 = 0x01;
@@ -170,6 +181,18 @@ fn handle(message: &Value) {
             drop(ui);
             crate::slots::store(&owner, data);
         }
+        ToClient::Section { owner, id, nodes } => {
+            ui.sections.retain(|(o, i, _)| !(*o == owner && *i == id));
+            if !nodes.is_empty() {
+                ui.sections.push((owner, id, nodes));
+            }
+        }
+        ToClient::Notify { owner, text } => {
+            log!("ui: {owner} notifies \"{text}\"");
+            ui.notes.push((text, Instant::now()));
+            let excess = ui.notes.len().saturating_sub(NOTES_MAX);
+            ui.notes.drain(..excess);
+        }
     }
 }
 
@@ -249,11 +272,15 @@ pub fn draw(api: &Api) {
         if !page && !search && FOCUS.swap(0, Ordering::Relaxed) != 0 {
             crate::input::set_focus(false);
         }
+        ui.notes.retain(|(_, at)| at.elapsed() < Duration::from_secs(NOTE_SECONDS));
         unsafe {
             if page {
                 draw_page(&mut d, &mut ui, &mut pending);
-            } else if screen == SCREEN_GAMEPLAY {
-                draw_status(&mut d);
+            } else {
+                if screen == SCREEN_GAMEPLAY {
+                    draw_status(&mut d);
+                }
+                draw_notes(&mut d, &ui.notes);
             }
         }
         for (owner, id) in &pending.closed {
@@ -325,9 +352,57 @@ pub fn after_panel_header(api: &Api, index: u8) {
     }
 }
 
+/// HUD messages from mods, top centre, newest last.
+unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)]) {
+    if notes.is_empty() {
+        return;
+    }
+    let api = d.api;
+    let mut layer = Layer::new();
+    let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkNotes"), LAYER_HUD);
+    let mut root_frame = Frame::new();
+    api.open_root(&mut root_frame, root);
+    let mut column = Frame::new();
+    api.open_column(&mut column, &d.key("shroudlinkNotes"), 4.0);
+    api.set_alignment(&column, 0x0102);
+    api.set_padding(&column, [0.0, 160.0, 0.0, 0.0]);
+    for (text, _) in notes {
+        api.text(text, STYLE_TITLE);
+    }
+    api.close_frame(&mut column);
+    api.close_frame(&mut root_frame);
+    api.end_layer(&mut layer);
+}
+
 /// Called inside the backpack panel's column right before its slot grid: the open search
-/// field sits below the title and the game moves the grid down to make room.
+/// field and the mods' sections sit below the title, and the game moves the grid down to
+/// make room.
 pub fn before_backpack_grid(api: &Api) {
+    draw_search_field(api);
+    let mut d = Draw { api, next_key: 0 };
+    let mut pending = Pending { events: Vec::new(), closed: Vec::new() };
+    {
+        let mut ui = UI.lock().unwrap();
+        for (owner, id, nodes) in ui.sections.iter_mut() {
+            unsafe {
+                let height: f32 = nodes.iter().map(node_height).sum::<f32>() + SPACING * nodes.len() as f32;
+                let mut column = Frame::new();
+                api.open_column(&mut column, &ident("shroudlinkSection", &format!("{owner}/{id}"), 0), SPACING);
+                api.set_size(&column, SECTION_WIDTH, height);
+                for (i, node) in nodes.iter_mut().enumerate() {
+                    draw_node(&mut d, owner, id, &i.to_string(), node, SECTION_WIDTH, &mut pending);
+                }
+                api.close_frame(&mut column);
+            }
+        }
+    }
+    for (owner, event) in pending.events {
+        log!("ui: section event {owner}/{}/{} {:?}", event.window, event.node, event.event);
+        crate::link::send(event.to_message(&owner));
+    }
+}
+
+fn draw_search_field(api: &Api) {
     if !SEARCH_OPEN.load(Ordering::Relaxed) {
         return;
     }

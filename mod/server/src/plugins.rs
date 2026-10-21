@@ -281,6 +281,11 @@ mod tests {
         let last = sent.last().unwrap();
         assert_eq!(last["op"], "open");
         assert!(last["window"]["content"].to_string().contains("clicked 2 time(s)"));
+        assert!(sent.iter().any(|m| m["op"] == "section" && m["id"] == "wave"), "hello adds its backpack section");
+        let wave = json!({ "mod": "hello", "op": "ui_event", "event": { "window": "wave", "node": "wave", "event": { "kind": "click" } } });
+        plugin.on_message(&mut host, ClientId(nonce), &wave);
+        let note = host.received_for_test(4, nonce);
+        assert_eq!(note[0]["op"], "notify");
         // outside an inventory event the game API answers nothing
         let event = InventoryEvent { kind: shroudlink_sdk::TransferKind::MoveAll, from: 1, to: 2 };
         assert!(plugin.keep(std::ptr::null_mut(), &event).is_empty());

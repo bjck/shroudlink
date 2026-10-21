@@ -117,8 +117,11 @@ pub fn disable(feature: Feature, reason: String) {
 
 pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::SelfTest];
 
-/// The features that work, for addons and mods.
+/// The features that work, for addons and mods (none before the scan, e.g. in unit tests).
 pub fn working() -> Vec<&'static str> {
+    if REGISTRY.get().is_none() {
+        return Vec::new();
+    }
     FEATURES.iter().filter(|&&f| available(f)).map(|f| f.name()).collect()
 }
 

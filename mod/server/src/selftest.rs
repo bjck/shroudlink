@@ -218,6 +218,12 @@ unsafe fn run(descriptor: &[u8]) {
         "MODS menu entry",
         if welcome.iter().any(|m| m["op"] == "entries" && m["owner"] == "chestsort") { Ok("chestsort offers its menu".into()) } else { Err("no chestsort entries".into()) },
     );
+    report.check(
+        "backpack section offered",
+        if welcome.iter().any(|m| m["op"] == "section" && m["owner"] == "hello") { Ok("hello adds its Wave row".into()) } else { Err("no section from hello".into()) },
+    );
+    let wave = send(json!({ "mod": "hello", "op": "ui_event", "event": { "window": "wave", "node": "wave", "event": { "kind": "click" } } }));
+    report.check("notification", if wave.iter().any(|m| m["op"] == "notify") { Ok("Wave answers with a HUD message".into()) } else { Err(format!("got {wave:?}")) });
     let open = send(ui_event("", "categories", json!({ "kind": "menu" })));
     let lists = open.iter().any(|m| m["op"] == "open" && m["window"]["content"].to_string().contains("\"list\""));
     report.check("chest categories window", if lists { Ok("opens with the category list".into()) } else { Err(format!("got {open:?}")) });

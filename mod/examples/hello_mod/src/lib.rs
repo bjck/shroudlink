@@ -1,9 +1,13 @@
-//! Example shroudlink mod DLL: a menu entry that opens a window with a counter.
+//! Example shroudlink mod DLL: a menu entry that opens a window with a counter, and a
+//! "Wave" button in the chest screen's backpack panel that shows a HUD message.
 //! Build it, drop `hello_mod.dll` into `shroudlink_mods/` next to the server.
 
 use std::collections::HashMap;
 
 use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
+
+/// The row hello adds to the chest screen's backpack panel.
+const SECTION: &str = "wave";
 use shroudlink_sdk::{export_mod, Host, Mod, Value};
 
 #[derive(Default)]
@@ -45,10 +49,18 @@ impl Mod for Hello {
     fn on_join(&mut self, host: &mut Host, client: u64) {
         let entries = ToClient::Entries { owner: "hello".into(), entries: vec![MenuEntry { id: "open".into(), label: "Hello mod".into() }] };
         host.send(client, &entries.to_message());
+        // a row in every chest screen's backpack panel
+        let section = ToClient::Section { owner: "hello".into(), id: SECTION.into(), nodes: vec![Node::Button { id: "wave".into(), label: "Wave".into() }] };
+        host.send(client, &section.to_message());
     }
 
     fn on_message(&mut self, host: &mut Host, client: u64, message: &Value) {
-        let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
+        let Some(UiEvent { window, node, event }) = UiEvent::from_message(message) else { return };
+        if window == SECTION {
+            let note = ToClient::Notify { owner: "hello".into(), text: "Hello from hello_mod!".into() };
+            host.send(client, &note.to_message());
+            return;
+        }
         match (node.as_str(), event) {
             ("open", Event::Menu) => {}
             ("click", Event::Click { .. }) => *self.clicks.entry(client).or_default() += 1,

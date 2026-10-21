@@ -27,6 +27,9 @@ name tables or savegames.
 3. Both sides exchange JSON messages, chunked into `Data` frames: `{"mod": "<id>", ...}`.
 
 ## Writing a mod
+Start with `python research/scripts/newmod.py my_mod`: it creates `mod/mods/my_mod/` with a
+MODS tab window, inventory event stubs and a unit test, and adds it to the workspace.
+
 Build a DLL with the `shroudlink-sdk` crate and drop it into `shroudlink_mods/` next to
 `enshrouded_server.exe`. It is loaded at server start, and **reloaded within seconds
 whenever you overwrite it** while players are connected (hot reload). The design is in
@@ -45,6 +48,9 @@ A mod can:
   `FromClient::Layout` (page order, to map stored positions to this session's slot ids).
   The addon never needs an update for a new feature built from them; chestsort's locks are
   one (`mods/chestsort/src/locks.rs`, about 100 lines).
+- add rows to the chest screen's backpack panel (`Section`, any UI nodes; events come back
+  as `ui_event` with the section id as window) and show short HUD messages (`Notify`).
+  `examples/hello_mod` adds a "Wave" button that answers with a message.
 
 Equipped items, the item in hand and the actionbar are always protected by the core.
 `mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).

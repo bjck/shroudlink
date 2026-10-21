@@ -4,7 +4,8 @@ Status: phase 1 (server events and game API) and phase 2 (client building blocks
 keys, slot marks, per-server storage, backpack layout; see `link/src/ui.rs`) are done.
 Phase 3: a hook registry (`server/src/hooks.rs`) switches features off individually when a
 game update breaks one hook point; `research/scripts/checksigs.py` checks a new build
-offline. Next: panel sections and notifications on the client.
+offline. Phase 2b: backpack panel sections and HUD notifications; `newmod.py` creates a
+mod from a template.
 
 ## Goal
 
