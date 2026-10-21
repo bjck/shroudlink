@@ -51,7 +51,7 @@ def main():
             shutil.copy2(RELEASE / "shroudlink_server.dll", server / "steam_api64.dll")
             mods = server / "shroudlink_mods"
             mods.mkdir(exist_ok=True)
-            for dll in ("chestsort.dll", "hello_mod.dll", "travel.dll", "storage.dll", "lantern.dll"):
+            for dll in ("chestsort.dll", "hello_mod.dll", "travel.dll", "storage.dll", "lantern.dll", "meter.dll"):
                 shutil.copy2(RELEASE / dll, mods / dll)
             print("installed the DLLs from mod/target/release")
         (server / REPORT).unlink(missing_ok=True)
