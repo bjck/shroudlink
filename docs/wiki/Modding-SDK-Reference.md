@@ -91,6 +91,7 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `position(entity)` | position in metres `[x, y (up), z]` |
 | `teleport(entity, [x, y, z])` | moves it; a player sees itself there right away |
 | `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
+| `player_name(player)` | the player's Steam name, sent by their addon (core v5); `None` for players without the addon |
 | `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
 | `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
 | `inventories_near(entity, radius)` | entities with an inventory (chests, stations) around an entity; only the world around players is loaded |

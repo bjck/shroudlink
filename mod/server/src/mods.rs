@@ -185,7 +185,8 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("hello_again") => join(host, client),
             Some("identify") => {
                 let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
-                crate::world::identify(client.0, &pages);
+                let name = message.get("name").and_then(Value::as_str).map(|n| n.chars().filter(|c| !c.is_control()).take(32).collect::<String>());
+                crate::world::identify(client.0, &pages, name.filter(|n| !n.trim().is_empty()));
             }
             // test automation (only with a shroudlink_probe file): players, positions, teleport
             Some("debug_players") if crate::game_events::probing() => {

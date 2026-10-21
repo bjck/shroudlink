@@ -137,6 +137,8 @@ pub struct HostApi {
     /// Applies a buff (`keen::Guid` of its `BuffType`, 16 bytes in memory order) to an
     /// entity and keeps it up for `seconds` (0: once); false if the server cannot apply buffs.
     pub apply_buff: unsafe extern "C" fn(entity: u32, buff: *const u8, seconds: f64) -> bool,
+    /// Copies up to `cap` bytes of a player's name (UTF-8); returns its length, 0: unknown.
+    pub player_name: unsafe extern "C" fn(entity: u32, buf: *mut u8, cap: usize) -> usize,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -315,6 +317,18 @@ impl World<'_> {
     pub fn apply_buff(&self, entity: u32, buff: &str, seconds: f64) -> bool {
         let Some(guid) = guid_bytes(buff) else { return false };
         self.api.version >= 5 && unsafe { (self.api.apply_buff)(entity, guid.as_ptr(), seconds) }
+    }
+
+    /// A player's name (their Steam name), known once their addon has identified the
+    /// player (after opening a chest); players without the addon have none.
+    pub fn player_name(&self, player: u32) -> Option<String> {
+        if self.api.version < 5 {
+            return None;
+        }
+        let mut buf = vec![0u8; 128];
+        let n = unsafe { (self.api.player_name)(player, buf.as_mut_ptr(), buf.len()) };
+        buf.truncate(n.min(buf.len()));
+        String::from_utf8(buf).ok().filter(|s| !s.is_empty())
     }
 
     /// The player entity behind an addon session. Known once the player has opened a chest
@@ -624,11 +638,14 @@ pub mod testing {
     unsafe extern "C" fn apply_buff(_: u32, _: *const u8, _: f64) -> bool {
         false
     }
+    unsafe extern "C" fn player_name(_: u32, _: *mut u8, _: usize) -> usize {
+        0
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name },
                 sent: Box::default(),
             }
         }

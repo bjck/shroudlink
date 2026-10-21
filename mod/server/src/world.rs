@@ -19,8 +19,12 @@ const UNITS_PER_METRE: f64 = 4_294_967_296.0;
 /// Addon session -> its player entity, learned from the backpack pages the addon reports.
 static CLIENTS: Mutex<Vec<(u64, u32)>> = Mutex::new(Vec::new());
 
-/// An addon reported its backpack pages: find the player whose inventory has them.
-pub fn identify(client: u64, pages: &[u32]) -> Option<u32> {
+/// Player entity -> the name its addon reported (the Steam name).
+static NAMES: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
+
+/// An addon reported its backpack pages (and its player's name): find the player whose
+/// inventory has them.
+pub fn identify(client: u64, pages: &[u32], name: Option<String>) -> Option<u32> {
     let player = world_ctx::with(|ctx| unsafe {
         let game = events::game();
         players().into_iter().find(|&p| {
@@ -35,7 +39,12 @@ pub fn identify(client: u64, pages: &[u32]) -> Option<u32> {
     let mut clients = CLIENTS.lock().unwrap();
     clients.retain(|&(c, p)| c != client && p != player);
     clients.push((client, player));
-    log!("world: client {client:016x} is player {player}");
+    log!("world: client {client:016x} is player {player}{}", name.as_deref().map(|n| format!(" ({n})")).unwrap_or_default());
+    if let Some(name) = name {
+        let mut names = NAMES.lock().unwrap();
+        names.retain(|(p, _)| *p != player);
+        names.push((player, name));
+    }
     Some(player)
 }
 
@@ -279,6 +288,17 @@ pub unsafe extern "C" fn api_apply_buff(entity: u32, buff: *const u8, seconds: f
     std::ptr::copy_nonoverlapping(buff, guid.as_mut_ptr(), 16);
     let keep = if seconds.is_finite() { seconds.clamp(0.0, 3600.0) } else { 0.0 };
     crate::buffs::apply(crate::buffs::Request { target: entity, buff: guid }, std::time::Duration::from_secs_f64(keep))
+}
+
+/// The name a player's addon reported, if any.
+pub fn player_name(player: u32) -> Option<String> {
+    NAMES.lock().unwrap().iter().find(|(p, _)| *p == player).map(|(_, n)| n.clone())
+}
+
+pub unsafe extern "C" fn api_player_name(entity: u32, buf: *mut u8, cap: usize) -> usize {
+    let Some(name) = player_name(entity) else { return 0 };
+    std::ptr::copy_nonoverlapping(name.as_ptr(), buf, name.len().min(cap));
+    name.len()
 }
 
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {

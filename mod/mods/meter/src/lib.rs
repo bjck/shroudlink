@@ -54,7 +54,7 @@ impl Meter {
         if world.player_of(viewer) == Some(player) {
             "You".into()
         } else {
-            format!("Player {player}")
+            player_name(world, player)
         }
     }
 
@@ -151,7 +151,7 @@ fn describe(world: &World, players: &HashSet<u32>, entity: u32) -> String {
         return "the world (a fall, drowning …)".into();
     }
     if players.contains(&entity) {
-        return format!("Player {entity}");
+        return player_name(world, entity);
     }
     // `keen::ecs::Faction` (1 byte), `keen::ecs::Level.dataStorage[0]` at +8
     let faction = world.component(entity, "Faction").and_then(|b| b.first().copied()).and_then(|f| FACTIONS.get(f as usize)).copied().unwrap_or("an enemy");
@@ -160,6 +160,11 @@ fn describe(world: &World, players: &HashSet<u32>, entity: u32) -> String {
         Some(l) => format!("{faction} (level {l})"),
         None => faction.to_string(),
     }
+}
+
+/// A player's Steam name (from their addon), else a number.
+fn player_name(world: &World, player: u32) -> String {
+    world.player_name(player).unwrap_or_else(|| format!("Player {player}"))
 }
 
 fn describe_death(death: &Death, now: f64) -> String {
