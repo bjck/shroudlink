@@ -1,0 +1,29 @@
+# Everything is ignored except what is listed: game installs, dumps, saves and
+# build output stay out of the repository. Ready-made zips go into GitHub releases.
+/*
+!/.gitignore
+!/README.md
+!/.gitattributes
+
+!/mod/
+/mod/target/
+
+!/research/
+/research/*
+!/research/scripts/
+__pycache__/
+
+!/dist/
+/dist/*
+!/dist/chestsort-enshrouded/
+/dist/chestsort-enshrouded/*
+!/dist/chestsort-enshrouded/README.txt
+!/dist/chestsort-enshrouded/UPDATE-SERVER.*
+!/dist/chestsort-enshrouded/chestsort_categories.json
+!/dist/chestsort-enshrouded/repatch/
+/dist/chestsort-enshrouded/repatch/*.exe
+/dist/chestsort-enshrouded/repatch/*.dll
+/dist/chestsort-enshrouded/repatch/server/
+/dist/chestsort-enshrouded/repatch/steamcmd/
+!/dist/shroudlink-client/
+/dist/shroudlink-client/*.dll

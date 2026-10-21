@@ -1,0 +1,18 @@
+[package]
+name = "shroudlink-client"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+# installed as dinput8.dll next to enshrouded.exe
+name = "shroudlink_client"
+crate-type = ["cdylib"]
+
+[dependencies]
+chestsort-common = { path = "../common" }
+iced-x86.workspace = true
+shroudlink = { path = "../link" }
+retour.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+windows-sys.workspace = true

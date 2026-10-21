@@ -1,0 +1,18 @@
+[package]
+name = "chestsort-server"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+# installed as crashhandler64.dll (or dinput8.dll), see src/lib.rs
+name = "chestsort"
+crate-type = ["cdylib"]
+
+[dependencies]
+chestsort-common = { path = "../common" }
+shroudlink = { path = "../link" }
+shroudlink-sdk = { path = "../sdk" }
+retour.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+windows-sys.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "hello_mod"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+shroudlink-sdk = { path = "../../sdk" }

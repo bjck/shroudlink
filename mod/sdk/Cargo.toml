@@ -1,0 +1,8 @@
+[package]
+name = "shroudlink-sdk"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+shroudlink = { path = "../link" }

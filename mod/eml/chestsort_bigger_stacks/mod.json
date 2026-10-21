@@ -1,0 +1,8 @@
+{
+    "id": "chestsort_bigger_stacks",
+    "name": "Bigger Stacks",
+    "description": "Multiplies the max stack size of stackable items (default x10). Items that do not stack (weapons, armor, tools - anything with durability or rolled stats) are left untouched.",
+    "version": "0.1.0",
+    "capabilities": ["patch"],
+    "authors": ["enshroudedChests"]
+}
