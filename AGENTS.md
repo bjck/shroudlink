@@ -62,8 +62,13 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
 - Every hook point is located by a **byte signature** (`SIG_*` constants) at the function
   entry. Helpers are found as the n-th `call` inside a signed function (`call_targets`),
   which survives patches better than signatures for small functions.
-- After a game update, check that every `SIG_*` still matches exactly once in the new
-  exe before anything else. Use `mksig.py` to make new signatures.
+- Server hook points live in one table, `server/src/hooks.rs` (`POINTS`, grouped by feature).
+  A feature whose points are missing switches off alone (`shroudlink_hooks.txt`, the
+  welcome's `features`). Add new server hooks there, not as loose `SIG_*` constants.
+- After a game update: `python research/scripts/checksigs.py <new enshrouded_server.exe>
+  [--client <client dump>]` shows which features survive before anything is deployed; then
+  `selftest.py`. `selftest.py --break <hook>` simulates a broken hook point. Use `mksig.py`
+  to make new signatures.
 - Struct offsets come from the game's reflection data (`kfc-parser extract-types`, then
   `reflect.py`) and from Ghidra (`ghidra.sh DecompileAt.java <outDir> <addr>`).
   Document an offset where it is used, with the type and field name (see `game.rs`).

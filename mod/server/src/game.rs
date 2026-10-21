@@ -7,18 +7,10 @@
 
 use std::ffi::c_void;
 
-use chestsort_common::scan::{call_targets, Module};
+use chestsort_common::scan::call_targets;
 
-/// `FUN_1401ad1c0(out, ctx, chestId, playerId, feedback)`: moves player stacks
-/// whose item already lies in the chest into that chest.
-const SIG_DEPOSIT_INTO_CHEST: &str = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FE FF FF 48 81 EC E0 02 00 00 48 8B 72 18";
-/// `FUN_1401ac400(out, ctx, playerId, stationId, sound)`: one Quick Stack Station
-/// activation; queries the chests in range and calls the function above per chest.
-const SIG_AREA_DEPOSIT: &str = "48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FE FF FF 48 81 EC E0 02 00 00 4C 8B FA";
+use crate::hooks;
 
-/// `FUN_1401ad940(out, ctx, sourceId, targetId, mode, flag)`: the "move all" button,
-/// moves every stack of the source (the player) into the target.
-const SIG_MOVE_ALL: &str = "48 89 4C 24 08 55 53 56 57 41 54 41 56 48 8D AC 24 A8 FC FF FF";
 
 pub type MoveAllFn =
     unsafe extern "system" fn(out: *mut DepositResult, ctx: *mut Ctx, source: u32, target: u32, mode: u32, flag: u8) -> *mut DepositResult;
@@ -154,7 +146,7 @@ pub fn slot_id(entity: u32, slot: u8) -> u64 {
 
 pub struct Game {
     pub deposit_into_chest: DepositIntoChestFn,
-    pub move_all: MoveAllFn,
+    pub move_all: Option<MoveAllFn>,
     storage_of: StorageOfFn,
     component_by_id: ComponentByIdFn,
     collect_pages: CollectPagesFn,
@@ -169,10 +161,11 @@ const DEPOSIT_SCAN_LEN: usize = 0x700;
 const AREA_SCAN_LEN: usize = 0x200;
 
 impl Game {
-    pub fn resolve(module: &Module) -> Result<Game, String> {
-        let deposit = module.find(SIG_DEPOSIT_INTO_CHEST)?;
-        let area = module.find(SIG_AREA_DEPOSIT)?;
-        let move_all = module.find(SIG_MOVE_ALL)?;
+    /// The inventory functions, from the hook registry; "move all" is optional.
+    pub fn resolve() -> Result<Game, String> {
+        let deposit = hooks::address("quick_stack")?;
+        let area = hooks::address("area_deposit")?;
+        let move_all = hooks::address("move_all").ok();
         let calls = call_targets(deposit, DEPOSIT_SCAN_LEN);
         let area_calls = call_targets(area, AREA_SCAN_LEN);
         if calls.len() < 15 || area_calls.len() < 2 {
@@ -185,7 +178,7 @@ impl Game {
         unsafe {
             Ok(Game {
                 deposit_into_chest: std::mem::transmute::<usize, DepositIntoChestFn>(deposit),
-                move_all: std::mem::transmute::<usize, MoveAllFn>(move_all),
+                move_all: move_all.map(|a| std::mem::transmute::<usize, MoveAllFn>(a)),
                 storage_of: std::mem::transmute::<usize, StorageOfFn>(calls[0]),
                 component_by_id: std::mem::transmute::<usize, ComponentByIdFn>(calls[1]),
                 collect_pages: std::mem::transmute::<usize, CollectPagesFn>(calls[4]),

@@ -35,6 +35,7 @@ pub fn game() -> &'static Game {
     GAME.get().unwrap()
 }
 
+/// Hooks quick stack (required) and move all (when found; otherwise only that is off).
 pub fn install(game: Game) -> Result<(), String> {
     let (deposit, move_all) = (game.deposit_into_chest, game.move_all);
     let _ = GAME.set(game);
@@ -42,9 +43,15 @@ pub fn install(game: Game) -> Result<(), String> {
         let hook = GenericDetour::<DepositIntoChestFn>::new(deposit, quick_stack_hook).map_err(|e| format!("creating quick stack hook failed: {e}"))?;
         hook.enable().map_err(|e| format!("enabling quick stack hook failed: {e}"))?;
         let _ = HOOK.set(hook);
-        let hook = GenericDetour::<MoveAllFn>::new(move_all, move_all_hook).map_err(|e| format!("creating move-all hook failed: {e}"))?;
-        hook.enable().map_err(|e| format!("enabling move-all hook failed: {e}"))?;
-        let _ = MOVE_ALL_HOOK.set(hook);
+        if let Some(move_all) = move_all {
+            let result = GenericDetour::<MoveAllFn>::new(move_all, move_all_hook).and_then(|hook| hook.enable().map(|()| hook));
+            match result {
+                Ok(hook) => {
+                    let _ = MOVE_ALL_HOOK.set(hook);
+                }
+                Err(e) => crate::hooks::disable(crate::hooks::Feature::MoveAll, format!("hook failed: {e}")),
+            }
+        }
     }
     Ok(())
 }

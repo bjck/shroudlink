@@ -104,7 +104,7 @@ pub(crate) fn ids() -> Vec<String> {
 pub(crate) fn join(host: &mut Host, client: ClientId) {
     with_mods(|mods| {
         let list: Vec<Value> = mods.iter().map(|m| m.describe()).collect();
-        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id() }));
+        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id(), "features": crate::hooks::working() }));
         for m in mods.iter_mut() {
             m.on_join(host, client);
         }

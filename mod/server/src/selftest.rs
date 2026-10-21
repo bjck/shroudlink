@@ -16,21 +16,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use chestsort_common::log;
-use chestsort_common::scan::Module;
 use retour::GenericDetour;
 use serde_json::{json, Value};
 
 use crate::events;
+use crate::hooks::{self, Feature};
 use crate::game::{slot_id, Ctx, DepositResult, Game, FAKE_PLAYER, SLOTS_PER_PAGE};
 use crate::link_host;
 use crate::mods;
 
-const MARKER: &str = "shroudlink_selftest";
+pub const MARKER: &str = "shroudlink_selftest";
 const REPORT: &str = "shroudlink_selftest.txt";
 
-const SIG_BOOT_SYSTEM: &str = "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D AC 24 30 8E FF FF";
-const SIG_BUILD_CTX: &str = "C6 81 A8 71 00 00 00 48 8B 42 08 48 89 01";
-const SIG_INIT_CTX: &str = "33 D2 33 C0 48 89 11 48 89 51 08 48 89 51 10 48 89 51 18 48 89 51 20 48 89 51 28 48 89 51 30 48 89 51 38 48 89 51 40 48 89 51 48 48 89 51 50 48 89 51 58 48 89 51 60 48 89 51 68 48 89 51 70 48 89 51 78 48 89 81 80 00 00 00";
 
 /// Descriptor bytes read by the context builder (last field at +0xe8).
 const DESCRIPTOR: usize = 0xf0;
@@ -66,15 +63,20 @@ pub fn fake_name(entity: u32) -> Option<String> {
     FAKE_NAME.lock().unwrap().as_ref().filter(|(e, _)| *e == entity).map(|(_, n)| n.clone())
 }
 
-pub fn install(module: &Module) {
+pub fn install() {
     if !chestsort_common::game_dir().join(MARKER).exists() {
         return;
     }
     let _ = std::fs::remove_file(chestsort_common::game_dir().join(REPORT));
     let result = (|| unsafe {
-        let boot = GenericDetour::<SystemFn>::new(std::mem::transmute::<usize, SystemFn>(module.find(SIG_BOOT_SYSTEM)?), boot_hook).map_err(|e| e.to_string())?;
-        let build = GenericDetour::<BuildCtxFn>::new(std::mem::transmute::<usize, BuildCtxFn>(module.find(SIG_BUILD_CTX)?), build_hook).map_err(|e| e.to_string())?;
-        let init = std::mem::transmute::<usize, InitCtxFn>(module.find(SIG_INIT_CTX)?);
+        for feature in [Feature::SelfTest, Feature::Inventory] {
+            if let Some(why) = hooks::problem(feature) {
+                return Err(format!("feature {} is off ({why})", feature.name()));
+            }
+        }
+        let boot = GenericDetour::<SystemFn>::new(std::mem::transmute::<usize, SystemFn>(hooks::address("boot_system")?), boot_hook).map_err(|e| e.to_string())?;
+        let build = GenericDetour::<BuildCtxFn>::new(std::mem::transmute::<usize, BuildCtxFn>(hooks::address("build_ctx")?), build_hook).map_err(|e| e.to_string())?;
+        let init = std::mem::transmute::<usize, InitCtxFn>(hooks::address("init_ctx")?);
         let hooks = HOOKS.get_or_init(|| Hooks { boot, build, init });
         hooks.boot.enable().map_err(|e| e.to_string())?;
         hooks.build.enable().map_err(|e| e.to_string())?;
@@ -180,6 +182,16 @@ unsafe fn run(descriptor: &[u8]) {
     hooks.build.call(ctx, descriptor.as_ptr());
     let ctx = ctx as *mut Ctx;
     let game = events::game();
+
+    // ---- hook registry ----
+    let off: Vec<String> = hooks::FEATURES.iter().filter_map(|&f| hooks::problem(f).map(|why| format!("{} ({why})", f.name()))).collect();
+    let marker = std::fs::read_to_string(chestsort_common::game_dir().join(MARKER)).unwrap_or_default();
+    if marker.contains("break ") {
+        let _ = writeln!(report.text, "INFO simulated broken hook points: {}", marker.lines().filter_map(|l| l.strip_prefix("break ")).collect::<Vec<_>>().join(", "));
+        report.check("only broken features are off", Ok(format!("on: {}; off: {}", hooks::working().join(", "), off.join("; "))));
+    } else {
+        report.check("hook points", if off.is_empty() { Ok(format!("{} found, features: {}", hooks::POINTS.len(), hooks::working().join(", "))) } else { Err(format!("off: {}", off.join("; "))) });
+    }
 
     // ---- mods ----
     let ids = mods::ids();
@@ -324,12 +336,17 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     report.check("quick stack leaves other items", if count(&p, fibre) == 3 && count(&c, fibre) == 0 { Ok("plant fibre stayed with the player".into()) } else { Err(format!("player fibre {}, chest fibre {}", count(&p, fibre), count(&c, fibre))) });
     report.check("quick stack keeps locked slot", if locked_intact(game) { Ok("5 locked iron bars stayed".into()) } else { Err("the locked stack changed".into()) });
 
-    let mut out: DepositResult = std::mem::zeroed();
-    (game.move_all)(&mut out, ctx, player, chest, 0, 0);
-    let (p, c) = (slots(game, ctx, player), slots(game, ctx, chest));
-    let _ = writeln!(report.text, "INFO after move all: player ore {} fibre {}, chest ore {} fibre {}", count(&p, ore), count(&p, fibre), count(&c, ore), count(&c, fibre));
-    report.check("move all moves the rest", if count(&c, fibre) == 3 { Ok("plant fibre went into the chest".into()) } else { Err(format!("chest holds {} plant fibre, expected 3", count(&c, fibre))) });
-    report.check("move all keeps locked slot", if locked_intact(game) { Ok("5 locked iron bars stayed".into()) } else { Err("the locked stack changed".into()) });
+    match game.move_all {
+        None => report.skip("move all", "feature move_all is off"),
+        Some(move_all) => {
+            let mut out: DepositResult = std::mem::zeroed();
+            move_all(&mut out, ctx, player, chest, 0, 0);
+            let (p, c) = (slots(game, ctx, player), slots(game, ctx, chest));
+            let _ = writeln!(report.text, "INFO after move all: player ore {} fibre {}, chest ore {} fibre {}", count(&p, ore), count(&p, fibre), count(&c, ore), count(&c, fibre));
+            report.check("move all moves the rest", if count(&c, fibre) == 3 { Ok("plant fibre went into the chest".into()) } else { Err(format!("chest holds {} plant fibre, expected 3", count(&c, fibre))) });
+            report.check("move all keeps locked slot", if locked_intact(game) { Ok("5 locked iron bars stayed".into()) } else { Err("the locked stack changed".into()) });
+        }
+    }
 
     let reply = send(json!({ "mod": "chestsort", "op": "slot_key", "key": "L", "slot": locked, "position": position, "item": ore }));
     let cleared = reply.iter().rev().find(|m| m["op"] == "marks").map(|m| m["marks"][0]["slots"].clone());

@@ -13,6 +13,7 @@
 mod events;
 mod game;
 mod game_api;
+mod hooks;
 mod link_host;
 mod mods;
 mod names;
@@ -121,27 +122,29 @@ fn init() {
         log!("could not inspect the host executable");
         return;
     };
-    let game = match game::Game::resolve(&module) {
-        Ok(g) => g,
-        Err(e) => {
-            log!("game functions not found ({e}); mod disabled. A game update probably changed the code.");
-            return;
+    hooks::scan(&module);
+    // every feature starts on its own: a game update that breaks one keeps the others
+    if hooks::available(hooks::Feature::Inventory) {
+        match game::Game::resolve().and_then(|game| {
+            log!("quick stack at +{:#x}", module.rva(game.deposit_into_chest as usize));
+            events::install(game)
+        }) {
+            Ok(()) => log!("inventory hooks installed"),
+            Err(e) => hooks::disable(hooks::Feature::Inventory, e),
         }
-    };
-    log!("quick stack at +{:#x}, move all at +{:#x}", module.rva(game.deposit_into_chest as usize), module.rva(game.move_all as usize));
-    match events::install(game) {
-        Ok(()) => log!("inventory hooks installed"),
-        Err(e) => {
-            log!("{e}; mods get no inventory events");
-            return;
-        }
+    }
+    if !hooks::available(hooks::Feature::Inventory) && hooks::available(hooks::Feature::MoveAll) {
+        hooks::disable(hooks::Feature::MoveAll, "needs the inventory feature".into());
     }
     names::start();
-    selftest::install(&module);
-    match link_host::install(&module) {
-        Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),
-        Err(e) => log!("shroudlink host disabled: {e}"),
+    selftest::install();
+    if hooks::available(hooks::Feature::Channel) {
+        match link_host::install(&module) {
+            Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),
+            Err(e) => hooks::disable(hooks::Feature::Channel, e),
+        }
     }
+    hooks::report(&module);
 }
 
 fn own_file_name() -> Option<String> {

@@ -1,11 +1,12 @@
 """Run the shroudlink self-test in a local dedicated server, no game client needed.
 
-usage: python selftest.py [--server DIR] [--no-install] [--timeout SECONDS]
+usage: python selftest.py [--server DIR] [--no-install] [--timeout SECONDS] [--break HOOK ...]
 
 Backs up the server's savegame, installs the freshly built DLLs (core as steam_api64.dll,
 mods into shroudlink_mods/), starts the server with the self-test marker, waits for
 shroudlink_selftest.txt, stops the server and restores the savegame (the tests move items).
-Exit code 0 when every test passed.
+Exit code 0 when every test passed. `--break move_all` simulates a game update that broke
+that hook point (names in mod/server/src/hooks.rs): only its feature may switch off.
 """
 import argparse
 import shutil
@@ -36,6 +37,7 @@ def main():
     ap.add_argument("--server", type=Path, default=ROOT / "server")
     ap.add_argument("--no-install", action="store_true", help="test the DLLs already installed")
     ap.add_argument("--timeout", type=int, default=180)
+    ap.add_argument("--break", dest="broken", action="append", default=[], help="hook point to treat as missing")
     args = ap.parse_args()
     server = args.server.resolve()
     save = server / "savegame"
@@ -53,7 +55,7 @@ def main():
                 shutil.copy2(RELEASE / dll, mods / dll)
             print("installed the DLLs from mod/target/release")
         (server / REPORT).unlink(missing_ok=True)
-        (server / MARKER).write_text("")
+        (server / MARKER).write_text("".join(f"break {name}\n" for name in args.broken))
         proc = subprocess.Popen([str(server / "enshrouded_server.exe")], cwd=server, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         start = time.time()
         report = server / REPORT

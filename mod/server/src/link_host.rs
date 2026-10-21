@@ -24,10 +24,6 @@ use shroudlink::{decode_packet, is_packet, split_message, string_id, Frame, Reas
 
 use crate::mods::{self, ClientId};
 
-const SIG_SET_STRING: &str = "48 89 5C 24 10 55 56 57 41 54 41 57";
-const SIG_NEXT_PENDING: &str = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 8B 7C 24 70";
-const SIG_MARK_SENT: &str = "48 89 74 24 20 57 48 83 EC 20 83 B9 E4 01 00 00 00";
-
 /// Beacon repeat interval for slots without a session. The beacon text is the same each
 /// time (same string id), so a vanilla client only ever stores it once.
 const BEACON_INTERVAL: Duration = Duration::from_secs(30);
@@ -302,9 +298,9 @@ unsafe extern "system" fn mark_sent_hook(strings: *mut c_void, id: u64, text: *c
 }
 
 pub fn install(module: &Module) -> Result<(), String> {
-    let set_string = module.find(SIG_SET_STRING)?;
-    let next_pending = module.find(SIG_NEXT_PENDING)?;
-    let mark_sent = module.find(SIG_MARK_SENT)?;
+    let set_string = crate::hooks::address("set_string")?;
+    let next_pending = crate::hooks::address("next_pending")?;
+    let mark_sent = crate::hooks::address("mark_sent")?;
     unsafe {
         let hooks = Hooks {
             set_string: GenericDetour::new(std::mem::transmute::<usize, SetStringFn>(set_string), set_string_hook)
