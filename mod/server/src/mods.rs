@@ -83,6 +83,11 @@ fn with_mods<R>(f: impl FnOnce(&mut Vec<Box<dyn ServerMod>>) -> R) -> R {
     f(&mut MODS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Ids of the registered mods.
+pub(crate) fn ids() -> Vec<String> {
+    with_mods(|mods| mods.iter().map(|m| m.id().to_owned()).collect())
+}
+
 pub(crate) fn join(host: &mut Host, client: ClientId) {
     with_mods(|mods| {
         let list: Vec<Value> = mods.iter().map(|m| m.describe()).collect();

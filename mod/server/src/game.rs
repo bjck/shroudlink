@@ -131,6 +131,9 @@ pub struct ItemInfo {
 // durability, level and perks. Vanilla quick stacking skips those items; the
 // category deposit does not need to, as the transfer moves the PIDE with the slot.
 
+/// The self-test lets an inventory play the player (there is none without a client).
+pub static FAKE_PLAYER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// Player inventory that deposits leave alone.
 #[derive(Default)]
 pub struct Reserved {
@@ -215,6 +218,9 @@ impl Game {
     /// Equipped items stay in their inventory slot; the equipment only points at it.
     /// True for player entities (they have a slot selection with actionbar pages).
     pub unsafe fn is_player(&self, ctx: *mut Ctx, entity: u32) -> bool {
+        if entity != 0 && FAKE_PLAYER.load(std::sync::atomic::Ordering::Relaxed) == entity {
+            return true;
+        }
         let selection = (self.player_links)((*ctx).world(), (*ctx).word(0x1d), entity);
         !selection.is_null() && *(selection.add(0xa0) as *const u32) != 0
     }

@@ -99,6 +99,11 @@ The C ABI (`shroudlink_mod_v2`, `HostApi`, `ModDecl` in `sdk/src/lib.rs`) passes
 and plain structs, so mods can be written in any language that can export a C function.
 v1 mods (`shroudlink_mod_v1`) still load; they get no inventory events.
 
+Test a mod inside a real dedicated server without starting the game:
+`python research/scripts/selftest.py` runs the core's self-test (fake addon session, quick
+stack and move all through the game's own functions, hot reload) and restores the savegame
+afterwards.
+
 Unit-test a mod without the game with `shroudlink_sdk::testing::MockHost`, which records
 what the mod sends (see the tests in `mods/chestsort/src/lib.rs`). Mod log lines
 (`shroudlink_sdk::log!`) go to the server's `shroudlink.log`.

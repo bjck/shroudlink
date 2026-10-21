@@ -34,8 +34,15 @@ cargo build --release                               # shroudlink_server.dll, che
 cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod loading, chestsort UI + locks
 ```
 
-- There are no automated tests against the game. Verify in game, and say so when you
-  could not.
+- **Self-test in the real server, no game client needed:** `python research/scripts/selftest.py`
+  (after `cargo build --release`). It backs up the local server's savegame, installs the
+  DLLs, starts `server/enshrouded_server.exe` with a marker file, waits for
+  `shroudlink_selftest.txt`, stops the server and restores the save. It covers mod loading,
+  a fake addon session (welcome, MODS menu, windows, item search), quick stack and move all
+  through the real game functions (category sorting, locks) and hot reload. Run it after
+  every core or mod change and after game updates. How it works: `server/src/selftest.rs`.
+- Not covered by the self-test (needs a real player): equipment protection, client UI.
+  Verify those in game, and say so when you could not.
 - **Client dev loop:** `python research/scripts/inject.py enshrouded.exe mod/target/release/shroudlink_client.dll`
   hot-reloads the addon into the running game; the new copy shuts the old one down.
   Logs go to `shroudlink_client.log` in the game folder. `research/scripts/shot.py <out.png>`

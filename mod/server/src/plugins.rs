@@ -236,6 +236,24 @@ pub fn reload_changed(host: &mut Host) {
     }
 }
 
+/// Self-test: rewrites `shroudlink_mods/<id>.dll` so it counts as changed.
+pub fn touch_for_test(id: &str) -> Result<(), String> {
+    let dir = LOADER.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|l| l.dir.clone()).ok_or("no mods loaded")?;
+    let path = dir.join(format!("{id}.dll"));
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::thread::sleep(Duration::from_millis(20));
+    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(())
+}
+
+/// Hot reload without waiting for the next check.
+pub fn reload_now(host: &mut Host) {
+    if let Some(loader) = LOADER.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        loader.checked = Instant::now() - RELOAD_CHECK;
+    }
+    reload_changed(host);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

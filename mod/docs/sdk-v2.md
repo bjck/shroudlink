@@ -81,6 +81,12 @@ global `shroudlink_sdk::log!` that writes to the server log.
   copy stays loaded but unused, so a game restart reclaims its memory.
 - **Tests without the game:** `shroudlink_sdk::testing::MockHost` captures sent messages,
   so a mod's UI logic can be unit-tested (see `mods/chestsort`).
+- **Self-test in the real server:** `research/scripts/selftest.py` starts the local
+  dedicated server with a marker file. Once the world has loaded, the core builds a game
+  context from a world system's descriptor and runs its tests on the game thread. The tests
+  cover a fake addon session, and quick stack plus move all between two inventories with test
+  stacks, a test chest name and a lock. The report is `shroudlink_selftest.txt`, and the
+  savegame is restored afterwards.
 
 ## Files
 

@@ -101,7 +101,10 @@ unsafe fn find_destination(pages: &[Page], item_id: u32, max_stack: u32) -> Opti
 }
 
 /// The name given to an entity with the Rename button, if any.
-unsafe fn name_of(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<String> {
+pub(crate) unsafe fn name_of(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<String> {
+    if let Some(name) = crate::selftest::fake_name(entity) {
+        return Some(name);
+    }
     if !LAYOUT_CHECKED.swap(true, Ordering::Relaxed) {
         let ok = game.verify_component_layout(ctx, entity);
         LAYOUT_OK.store(ok, Ordering::Relaxed);

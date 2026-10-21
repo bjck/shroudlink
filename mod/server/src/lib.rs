@@ -17,6 +17,7 @@ mod link_host;
 mod mods;
 mod names;
 mod plugins;
+mod selftest;
 mod steam_proxy;
 
 use std::ffi::c_void;
@@ -136,6 +137,7 @@ fn init() {
         }
     }
     names::start();
+    selftest::install(&module);
     match link_host::install(&module) {
         Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),
         Err(e) => log!("shroudlink host disabled: {e}"),

@@ -164,9 +164,9 @@ impl Host {
         }
     }
 
-    /// Test helper: drains the beacon of `slot` and binds session `nonce` to it.
-    #[cfg(test)]
-    pub fn connect_for_test(&mut self, slot: usize, nonce: u64) {
+    /// Binds a client session `nonce` to `slot` as if an addon had claimed it (tests
+    /// and the self-test, which has no real player).
+    pub fn connect_fake(&mut self, slot: usize, nonce: u64) {
         while let Some(p) = self.poll(slot, 1) {
             let (id, ptr) = (p.id, p.text.as_ptr());
             self.confirm(slot, id, ptr);
@@ -175,9 +175,8 @@ impl Host {
         self.receive_packet(claim.as_bytes());
     }
 
-    /// Test helper: the JSON messages queued for session `nonce` on `slot`.
-    #[cfg(test)]
-    pub fn received_for_test(&mut self, slot: usize, nonce: u64) -> Vec<Value> {
+    /// The JSON messages queued for session `nonce` on `slot`, as if the game sent them.
+    pub fn take_messages(&mut self, slot: usize, nonce: u64) -> Vec<Value> {
         let mut r = Reassembler::default();
         let mut out = Vec::new();
         while let Some(p) = self.poll(slot, 1) {
@@ -192,6 +191,26 @@ impl Host {
             self.confirm(slot, id, ptr);
         }
         out
+    }
+
+    /// A message from session `nonce`, as if its addon had sent it.
+    pub fn deliver_test_message(&mut self, nonce: u64, message: &Value) {
+        let bytes = serde_json::to_vec(message).unwrap_or_default();
+        let msg = self.next_msg;
+        self.next_msg = self.next_msg.wrapping_add(1);
+        for packet in split_message(nonce, msg, &bytes) {
+            self.receive_packet(packet.as_bytes());
+        }
+    }
+
+    #[cfg(test)]
+    pub fn connect_for_test(&mut self, slot: usize, nonce: u64) {
+        self.connect_fake(slot, nonce)
+    }
+
+    #[cfg(test)]
+    pub fn received_for_test(&mut self, slot: usize, nonce: u64) -> Vec<Value> {
+        self.take_messages(slot, nonce)
     }
 
     fn receive(&mut self, frame: Frame) {
@@ -235,7 +254,7 @@ impl Host {
     }
 }
 
-fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> R {
+pub(crate) fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> R {
     let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
     f(guard.get_or_insert_with(Host::default))
 }
