@@ -102,8 +102,8 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 `mods/storage` shows everything in the chests around the player as one grid and fetches
 an item from all of them with one click.
 `mods/travel` is a complete example: it reads the player's `PlayerWaypoint` (the map
-marker) and teleports there. `mods/lantern` keeps the Ring of Light's buff (a light on
-the chest) on a player from `on_tick`.
+marker) and teleports there. `mods/lantern` gives the Ring of Light's buff (a light on
+the chest) for 10 minutes when a player drinks a Wisp of Light flask (`ConsumeItemEvent`).
 
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 

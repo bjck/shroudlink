@@ -43,8 +43,10 @@ impact VM (`server/src/buffs.rs`):
   the ring does (`World::apply_buff(entity, guid, seconds)`). The third native argument
   is not a lifetime: with it set, no buff entity appears.
 
-The `lantern` mod (MODS -> Lantern) keeps the buff for 30 s and renews that every 10 s
-from `on_tick`; Light off ends it at once.
+The `lantern` mod first had a MODS switch. It now gives the light for 10 minutes when a
+player drinks the vanilla `Consumable_Potion_Flask_Wisp_Of_Light` (whose own wisp gives
+only a faint light), so it costs an item and works without the addon. `ConsumeItemEvent`
+names only the slot, so the mod remembers once a second which slots hold a flask.
 
 **Verified in game (2026-10-21, local server):** with the light on, a buff entity with
 `BuffComponent.buffTypeId` 2348168016 exists for as long as the light is on and is gone

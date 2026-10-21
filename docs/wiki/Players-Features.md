@@ -69,13 +69,14 @@ Set a waypoint on the map (M, then right-click a spot), open **MODS → Travel**
 **Travel to the marker**. You land there right away, from anywhere, the shroud included.
 The server has to know which player you are first: open any chest once after joining.
 
-## Lantern (addon)
+## Lantern: Wisp of Light flasks shine brighter (everyone, no addon needed)
 
 ![Lantern off and on](https://raw.githubusercontent.com/bjck/shroudlink/main/docs/screenshots/lantern.jpg)
 
-**MODS → Lantern → Light on** puts a light around your character, with both hands free
-for weapons and tools. It is the same light as the game's Ring of Light, without wearing
-the ring. **Light off** switches it off again; leaving the server switches it off too.
+Drink a **Wisp of Light** flask, the normal game item. Besides its small wisp, you now
+get a strong light around your character for **10 minutes**, with both hands free for
+weapons and tools: the same light as the game's Ring of Light. Drinking another flask
+starts the 10 minutes again.
 
 ## Storage: all chests as one box (addon)
 
