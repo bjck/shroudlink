@@ -220,6 +220,12 @@ unsafe fn run(ctx: *mut Ctx) {
         _ => report.skip("inventory events", "chestsort did not name test items"),
     }
 
+    // ---- tick: every v5 mod gets it ----
+    let before = crate::plugins::TICKS.load(Ordering::SeqCst);
+    link_host::with_host(crate::mods::tick_now);
+    let ticked = crate::plugins::TICKS.load(Ordering::SeqCst) - before;
+    report.check("mod tick", if ticked >= 3 { Ok(format!("{ticked} v5 mod(s) got on_tick")) } else { Err(format!("{ticked} mod(s) ticked")) });
+
     // ---- hot reload ----
     match crate::plugins::touch_for_test("chestsort") {
         Ok(()) => {

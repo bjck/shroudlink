@@ -60,6 +60,9 @@ static API: HostApi = HostApi {
     apply_buff: crate::world::api_apply_buff,
 };
 
+/// Ticks handed to v5 mods, for the self-test.
+pub static TICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 enum Decl {
     V1(&'static ModDeclV1),
     V2(&'static ModDeclV2),
@@ -141,7 +144,10 @@ impl ServerMod for Plugin {
     }
     fn on_tick(&mut self, host: &mut Host) {
         match self.decl {
-            Decl::V3(d) if d.version >= 5 => unsafe { (d.on_tick)(d.state, &API, host as *mut Host as *mut c_void) },
+            Decl::V3(d) if d.version >= 5 => {
+                TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                unsafe { (d.on_tick)(d.state, &API, host as *mut Host as *mut c_void) }
+            }
             _ => {}
         }
     }

@@ -90,6 +90,10 @@ pub(crate) fn tick(host: &mut Host) {
         }
         *last = Some(std::time::Instant::now());
     }
+    tick_now(host);
+}
+
+pub(crate) fn tick_now(host: &mut Host) {
     with_mods(|mods| mods.iter_mut().for_each(|m| m.on_tick(host)));
 }
 
