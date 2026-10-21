@@ -1,7 +1,10 @@
-# Enshrouded chestsort + shroudlink
+# shroudlink
 
-Mods for an Enshrouded 1.0 dedicated server (tested on Game Host Bros, Linux/Wine) and
-a small optional client addon.
+A mod framework for Enshrouded 1.0 dedicated servers: server mods talk to an optional
+client addon over the game's own netcode and show native in-game UI. Players without the
+addon play normally. Ships with **chestsort**, the mod it was built for.
+
+## chestsort
 
 **Server (`steam_api64.dll` proxy)**
 - Chests sort by name: rename a chest to e.g. "Food, Wood" and the deposit button or a
@@ -9,10 +12,6 @@ a small optional client addon.
   (`chestsort_categories.json`, reloaded live).
 - Equipped items and the item in hand are never deposited.
 - Optional EML data mods: chests x2 slots, stacks x10.
-
-**shroudlink**: a channel between server mods and an optional client addon over the
-game's own netcode, with native in-game UI (MODS tab in the player menu). Players
-without the addon play normally.
 
 **Client addon (`dinput8.dll`)**
 - MODS tab with the server's mod windows (chest categories, item search).
