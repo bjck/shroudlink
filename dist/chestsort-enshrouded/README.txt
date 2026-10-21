@@ -1,13 +1,22 @@
-chestsort - Enshrouded server mod
-=================================
-- Chests sort by name: rename a chest to e.g. "Food, Wood", "Spells" or "Ores & Gems", then
-  press the stack-to-chest button or use a Quick Stack Station. Every item of those
-  categories goes into that chest.
+shroudlink - Enshrouded server mods
+===================================
+Server side (everyone, no addon needed):
+- Chests sort by name: rename a chest to e.g. "Food, Wood", "Spells" or "Ores & Gems",
+  then press the stack-to-chest button or use a Quick Stack Station. Every item of
+  those categories goes into that chest.
+- Action bar and equipped items are never put into chests.
 - Chests have 2x the slots (max 128), and items that stack hold 10x as many.
 
-Categories and the words that work in chest names are in chestsort_categories.json
-on the server. Edits apply within seconds; mistakes are reported in shroudlink.log.
+With the client addon (shroudlink-client-next.zip) players also get:
+- item search in chests, slot locks (L)
+- MODS tab: Chest categories, Travel (to your map waypoint, also from the shroud),
+  Storage (all chests within 40 m as one box)
 
+Files on the server (next to enshrouded_server.exe):
+  steam_api64.dll        the shroudlink core (Steam's original renamed to steam_api64_o.dll)
+  shroudlink_mods\*.dll  the mods (chestsort, travel, storage); remove one to switch it off
+  chestsort_categories.json   categories; edits apply within seconds
+  shroudlink.log         what the core and mods did
 
 WHEN A GAME UPDATE COMES OUT
 ----------------------------

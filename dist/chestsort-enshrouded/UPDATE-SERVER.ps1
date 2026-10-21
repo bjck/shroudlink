@@ -156,10 +156,12 @@ try {
     Step '6. Uploading patched files and the mod'
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc') 'enshrouded_server.kfc' "vanilla-$build"
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc_resources') 'enshrouded_server.kfc_resources' "vanilla-$build"
-    # the shroudlink core (as Steam's DLL, which it passes every call on to) and the chestsort mod
+    # the shroudlink core (as Steam's DLL, which it passes every call on to) and the mods
     Upload (Join-Path $repatch 'steam_api64.dll') 'steam_api64.dll' "before-$stamp"
     if (-not (Exists 'shroudlink_mods')) { New-SFTPItem -SessionId $sid -Path '/shroudlink_mods' -ItemType Directory | Out-Null }
-    Upload (Join-Path $PSScriptRoot 'shroudlink_mods\chestsort.dll') 'shroudlink_mods/chestsort.dll' "before-$stamp"
+    foreach ($mod in Get-ChildItem (Join-Path $PSScriptRoot 'shroudlink_mods') -Filter '*.dll') {
+        Upload $mod.FullName "shroudlink_mods/$($mod.Name)" "before-$stamp"
+    }
     if (-not (Exists 'steam_api64_o.dll')) {
         Write-Host '   WARNING: steam_api64_o.dll (the original Steam DLL) is missing on the server!' -ForegroundColor Red
         Write-Host '   The mod cannot start without it. Ask for help before starting the server.' -ForegroundColor Red
