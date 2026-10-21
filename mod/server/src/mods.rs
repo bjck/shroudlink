@@ -40,6 +40,8 @@ pub trait ServerMod: Send {
         Vec::new()
     }
     fn on_game_event(&mut self, _hash: u32, _data: &[u8]) {}
+    /// About once a second, from the network update.
+    fn on_tick(&mut self, _host: &mut Host) {}
 }
 
 static MODS: Mutex<Vec<Box<dyn ServerMod>>> = Mutex::new(Vec::new());
@@ -76,6 +78,19 @@ pub(crate) fn game_events(events: &[(u32, &[u8])]) {
             }
         }
     });
+}
+
+/// Gives every mod its tick, at most once a second (called from every network update).
+pub(crate) fn tick(host: &mut Host) {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    with_mods(|mods| mods.iter_mut().for_each(|m| m.on_tick(host)));
 }
 
 /// Swaps in a new build of a mod (hot reload) and welcomes the connected clients again.
@@ -181,6 +196,15 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
                 let near = player.and_then(crate::world::position).map(|p| crate::world::inventories_around(p, radius)).unwrap_or_default();
                 let list: Vec<Value> = near.iter().map(|(e, p, n)| json!({ "entity": e, "position": p, "name": n })).collect();
                 log!("debug_inventories: {}", Value::Array(list));
+            }
+            Some("debug_buff") if crate::game_events::probing() => {
+                let buff = message.get("buff").and_then(Value::as_str).and_then(shroudlink_sdk::guid_bytes);
+                let player = crate::world::player_of(client.0).or_else(|| crate::world::players().first().copied());
+                let queued = match (buff, player) {
+                    (Some(buff), Some(target)) => crate::buffs::apply(crate::buffs::Request { target, buff }),
+                    _ => false,
+                };
+                log!("debug_buff: player {player:?}, queued {queued}, getSelf calls {}", crate::buffs::calls());
             }
             Some("debug_face") if crate::game_events::probing() => {
                 let yaw = message.get("yaw").and_then(Value::as_f64).unwrap_or(0.0);

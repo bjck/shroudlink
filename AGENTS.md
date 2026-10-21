@@ -104,6 +104,10 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
 - `world_ctx` builds contexts from the boot system's descriptor; its first field points at
   a stack object, so the core keeps a relocated heap copy (`world_ctx.rs`). Using the raw
   descriptor later crashes.
+- Buffs are applied through the impact VM's natives (`fn(out, args, vm)`, registered by
+  name in `FUN_14022e680`). Their context (`vm + 0x30`) only exists while a program runs,
+  so `buffs.rs` applies queued requests from inside the `getSelf` native. Without a player
+  no program runs on a dedicated server: the self-test cannot apply a buff.
 - A crash or panic of the core is logged to shroudlink.log (`CRASH:` / `PANIC:`); the
   server has no crash handler of its own.
 - In game automation: E interacts with what the *camera* looks at; 1500 mouse counts turn

@@ -133,6 +133,7 @@ impl Host {
             self.send(client, &message);
         }
         crate::plugins::reload_changed(self);
+        mods::tick(self);
         if self.slot(slot).gen != Some(gen) {
             self.end_session(slot);
             let state = self.slot(slot);

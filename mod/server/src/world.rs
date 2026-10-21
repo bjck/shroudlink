@@ -258,6 +258,12 @@ pub unsafe extern "C" fn api_move_stack(from: u32, slot: u64, to: u32) -> u32 {
     move_stack(from, slot, to)
 }
 
+pub unsafe extern "C" fn api_apply_buff(entity: u32, buff: *const u8) -> bool {
+    let mut guid = [0u8; 16];
+    std::ptr::copy_nonoverlapping(buff, guid.as_mut_ptr(), 16);
+    crate::buffs::apply(crate::buffs::Request { target: entity, buff: guid })
+}
+
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {
     player_of(client).unwrap_or(0)
 }

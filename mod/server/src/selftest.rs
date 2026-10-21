@@ -314,6 +314,8 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     let mut transform = [0u8; 64];
     let size = crate::world::read_component(chest, crate::components::hash::CURRENT_TRANSFORM, &mut transform);
     report.check("world component read", if size == 56 { Ok(format!("CurrentTransform of the chest, {size} bytes")) } else { Err(format!("size {size}")) });
+    // buffs need a running impact program, which needs a real player nearby
+    let _ = writeln!(report.text, "INFO buffs: feature {}, getSelf ran {} time(s) so far", if crate::hooks::available(crate::hooks::Feature::Buffs) { "on" } else { "OFF" }, crate::buffs::calls());
     FAKE_PLAYER.store(0, Ordering::SeqCst);
     *FAKE_NAME.lock().unwrap() = None;
 }

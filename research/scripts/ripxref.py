@@ -17,6 +17,8 @@ def main():
     pe = pefile.PE(path, fast_load=True)
     base = pe.OPTIONAL_HEADER.ImageBase
     data = open(path, "rb").read()  # dump: file offset == RVA
+    if len(data) < pe.OPTIONAL_HEADER.SizeOfImage:  # a file on disk, not a dump
+        data = pe.get_memory_mapped_image()
     text = next(s for s in pe.sections if s.Name.startswith(b".text"))
     t0, t1 = text.VirtualAddress, text.VirtualAddress + text.Misc_VirtualSize
 

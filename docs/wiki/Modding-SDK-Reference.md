@@ -13,6 +13,7 @@ pub trait Mod: Send {
     fn on_leave(&mut self, host: &mut Host, client: u64) {}
     fn keep(&mut self, game: &Game, event: &InventoryEvent) -> Vec<u64> { vec![] }
     fn on_transfer(&mut self, game: &Game, event: &InventoryEvent) -> u32 { 0 }
+    fn on_tick(&mut self, host: &mut Host) {}          // about once a second (core v5)
 }
 export_mod!(MyMod);   // MyMod: Mod + Default
 ```
@@ -92,16 +93,17 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
 | `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
 | `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
-
 | `inventories_near(entity, radius)` | entities with an inventory (chests, stations) around an entity; only the world around players is loaded |
 | `inventory(entity)` | every slot of any entity's inventory |
 | `move_stack(from, slot, to)` | moves a stack between two inventories outside any player action; a player's equipment, item in hand and action bar are never taken nor filled |
+| `apply_buff(entity, "guid")` | gives an entity a vanilla buff by the Guid of its `BuffType`, the way an item or spell would (core v5, experimental). Clients show its effects from their own data, so no client files are needed |
 
 `components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
 `mods/storage` shows everything in the chests around the player as one grid and fetches
 an item from all of them with one click.
 `mods/travel` is a complete example: it reads the player's `PlayerWaypoint` (the map
-marker) and teleports there.
+marker) and teleports there. `mods/lantern` keeps the Ring of Light's buff (a light on
+the chest) on a player from `on_tick`.
 
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 
@@ -132,11 +134,12 @@ sessions, store **positions** (see [[UI and building blocks|Modding-UI-and-Build
 ## The C ABI (other languages)
 
 Mods export `shroudlink_mod_v2() -> *const ModDecl`; `decl.version` says the layout
-(3 = with game events). `HostApi` and `ModDecl` are
+(3 = with game events, 5 = with `on_tick`). `HostApi` and `ModDecl` are
 `#[repr(C)]` structs in `sdk/src/lib.rs`. Messages cross the boundary as UTF-8 JSON with
 a length, and game calls are plain C functions taking the opaque `game` pointer of the
 current callback.
 
-- v2 appended inventory events to the v1 layout, and v3 appended game events. The host
-  still loads v1 and v2 mods; they get no events their version does not know.
+- v2 appended inventory events to the v1 layout, v3 appended game events, and v5
+  appended `on_tick` (`HostApi` v5: `apply_buff`). The host still loads older mods; they
+  get no callbacks their version does not know.
 - New host functions are only ever appended.

@@ -57,6 +57,7 @@ static API: HostApi = HostApi {
     inventories_near: crate::world::api_inventories_near,
     inventory: crate::world::api_inventory,
     move_stack_between: crate::world::api_move_stack,
+    apply_buff: crate::world::api_apply_buff,
 };
 
 enum Decl {
@@ -138,6 +139,12 @@ impl ServerMod for Plugin {
             unsafe { (d.on_game_event)(d.state, &API, hash, data.as_ptr(), data.len()) }
         }
     }
+    fn on_tick(&mut self, host: &mut Host) {
+        match self.decl {
+            Decl::V3(d) if d.version >= 5 => unsafe { (d.on_tick)(d.state, &API, host as *mut Host as *mut c_void) },
+            _ => {}
+        }
+    }
 }
 
 unsafe fn load(path: &Path) -> Result<Plugin, String> {
@@ -153,6 +160,7 @@ unsafe fn load(path: &Path) -> Result<Plugin, String> {
         (decl.on_load)(decl.state, &API);
         match decl.version {
             2 => Decl::V2(decl),
+            // v4 has the v3 layout, v5 appends on_tick (read only for v5 and later)
             3.. => Decl::V3(&*(decl as *const ModDeclV2 as *const ModDecl)),
             v => return Err(format!("ABI version {v} (host {ABI_VERSION})")),
         }

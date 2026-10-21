@@ -56,6 +56,10 @@ A mod can:
   "PickupEvent", "LevelUpEvent"), and `on_game_event` gets each occurrence;
   `event.known()` decodes the common ones. `examples/hello_mod` announces deaths and
   level-ups.
+- work with the **world** from any callback (`host.world()`): players, positions,
+  teleport, any component, nearby inventories, moving stacks, and vanilla **buffs**
+  (`apply_buff`, through the game's impact VM: `server/src/buffs.rs`). `on_tick` runs
+  about once a second. `mods/travel`, `mods/storage` and `mods/lantern` use them.
 
 Equipped items, the item in hand and the actionbar are always protected by the core.
 `mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).

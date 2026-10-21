@@ -52,9 +52,10 @@ pub mod components {
 }
 pub use events::{GameEvent, Known};
 
-/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v3 mods. `HostApi`
+/// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v4 mods. `HostApi`
 /// tells its own version: functions newer than it must not be called (the SDK checks).
-pub const ABI_VERSION: u32 = 4;
+/// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`.
+pub const ABI_VERSION: u32 = 5;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -132,6 +133,10 @@ pub struct HostApi {
     pub inventory: unsafe extern "C" fn(entity: u32, out: *mut Slot, cap: usize) -> usize,
     /// Moves a stack between two inventories; returns the items moved.
     pub move_stack_between: unsafe extern "C" fn(from: u32, slot: u64, to: u32) -> u32,
+    // v5
+    /// Queues a buff (`keen::Guid` of its `BuffType`, 16 bytes in memory order) for an
+    /// entity; false if the server cannot apply buffs.
+    pub apply_buff: unsafe extern "C" fn(entity: u32, buff: *const u8) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -155,6 +160,9 @@ pub struct ModDecl {
     pub game_events: unsafe extern "C" fn(state: *mut c_void, out: *mut u32, cap: usize) -> usize,
     /// One game event: its type id and payload.
     pub on_game_event: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, hash: u32, data: *const u8, len: usize),
+    // v5
+    /// About once a second, on the game thread.
+    pub on_tick: unsafe extern "C" fn(state: *mut c_void, api: *const HostApi, ctx: *mut c_void),
 }
 
 /// The v2 export layout (v1 fields plus inventory events), for hosts that load v2 mods.
@@ -297,6 +305,16 @@ impl World<'_> {
         unsafe { (self.api.move_stack_between)(from, slot, to) }
     }
 
+    /// Gives an entity a buff of the game, by the Guid of its `BuffType`
+    /// ("b2f8db72-a69d-43db-baf1-c69937ec0264"). The game applies it the way an item or
+    /// spell would, with the buff's own lifetime: clients show its effects with their own
+    /// data, so any vanilla buff works without client changes. Applied within a frame;
+    /// false if the server cannot apply buffs or the Guid is malformed.
+    pub fn apply_buff(&self, entity: u32, buff: &str) -> bool {
+        let Some(guid) = guid_bytes(buff) else { return false };
+        self.api.version >= 5 && unsafe { (self.api.apply_buff)(entity, guid.as_ptr()) }
+    }
+
     /// The player entity behind an addon session. Known once the player has opened a chest
     /// screen this session (the addon identifies itself with its backpack's pages).
     pub fn player_of(&self, client: u64) -> Option<u32> {
@@ -403,6 +421,8 @@ pub trait Mod: Send {
     /// One game event of a type from [`Mod::game_events`]. Runs on the game thread once per
     /// event, so keep it short.
     fn on_game_event(&mut self, _events: &Events, _event: &GameEvent) {}
+    /// About once a second on the game thread (host v5), e.g. to keep a buff going.
+    fn on_tick(&mut self, _host: &mut Host) {}
 }
 
 static API: AtomicPtr<HostApi> = AtomicPtr::new(std::ptr::null_mut());
@@ -421,6 +441,30 @@ macro_rules! log {
     ($($arg:tt)*) => { $crate::log(&format!($($arg)*)) };
 }
 
+/// A Guid in its text form ("b2f8db72-a69d-43db-baf1-c69937ec0264") as the game keeps it
+/// in memory (`keen::Guid`): the first three groups little-endian, the rest as written.
+pub fn guid_bytes(text: &str) -> Option<[u8; 16]> {
+    let text = text.trim();
+    let groups: Vec<&str> = text.split('-').collect();
+    if text.len() != 36 || groups.iter().map(|g| g.len()).collect::<Vec<_>>() != [8, 4, 4, 4, 12] {
+        return None;
+    }
+    let hex: String = groups.concat();
+    let mut b = [0u8; 16];
+    for (i, byte) in b.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    b[0..4].reverse();
+    b[4..6].reverse();
+    b[6..8].reverse();
+    Some(b)
+}
+
+/// The game's hash of a Guid (FNV-1a over its bytes), e.g. the `BuffTypeId` of a buff.
+pub fn guid_hash(guid: &[u8; 16]) -> u32 {
+    guid.iter().fold(0x811c9dc5u32, |h, &b| (h ^ b as u32).wrapping_mul(0x1000193))
+}
+
 /// The server's folder (next to `enshrouded_server.exe`), for a mod's own files.
 pub fn server_dir() -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())).unwrap_or_else(|| PathBuf::from("."))
@@ -432,7 +476,7 @@ pub mod glue {
 
     pub fn decl<M: Mod + 'static>(m: M) -> ModDecl {
         let state = Box::into_raw(Box::new(Box::new(m) as Box<dyn Mod>)) as *mut c_void;
-        ModDecl { version: ABI_VERSION, state, id, on_join, on_message, on_leave, on_load, keep, on_transfer, game_events, on_game_event }
+        ModDecl { version: ABI_VERSION, state, id, on_join, on_message, on_leave, on_load, keep, on_transfer, game_events, on_game_event, on_tick }
     }
 
     unsafe fn this<'a>(state: *mut c_void) -> &'a mut Box<dyn Mod> {
@@ -495,6 +539,10 @@ pub mod glue {
         let Some(name) = events::name_of(hash) else { return };
         let event = GameEvent { hash, name, data: std::slice::from_raw_parts(data, len) };
         this(state).on_game_event(&Events { api: &*api }, &event);
+    }
+
+    unsafe extern "C" fn on_tick(state: *mut c_void, api: *const HostApi, ctx: *mut c_void) {
+        this(state).on_tick(&mut Host { api: &*api, ctx });
     }
 }
 
@@ -571,11 +619,14 @@ pub mod testing {
     unsafe extern "C" fn move_stack_between(_: u32, _: u64, _: u32) -> u32 {
         0
     }
+    unsafe extern "C" fn apply_buff(_: u32, _: *const u8) -> bool {
+        false
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff },
                 sent: Box::default(),
             }
         }
@@ -592,5 +643,21 @@ pub mod testing {
         pub fn take_sent(&mut self) -> Vec<(u64, Value)> {
             std::mem::take(&mut *self.sent)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guid_text_maps_to_the_games_bytes_and_hash() {
+        // the Ring of Light's buff; EML's game.guid.hash gives 2348168016 for it
+        let guid = guid_bytes("b2f8db72-a69d-43db-baf1-c69937ec0264").unwrap();
+        assert_eq!(&guid[..4], &[0x72, 0xdb, 0xf8, 0xb2]);
+        assert_eq!(guid_hash(&guid), 2348168016);
+        assert_eq!(guid_bytes("b2f8db72a69d43dbbaf1c69937ec0264"), None);
+        assert_eq!(guid_bytes("zzf8db72-a69d-43db-baf1-c69937ec0264"), None);
+        assert_eq!(guid_bytes("b2f8db72-a69d4-3db-baf1-c69937ec0264"), None);
     }
 }
