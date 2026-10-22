@@ -152,7 +152,7 @@ fn receive(frame: Frame) -> Option<Value> {
     }
 }
 
-fn dispatch(message: &Value) {
+pub(crate) fn dispatch(message: &Value) {
     let target = message.get("mod").and_then(Value::as_str).unwrap_or("");
     if target == "shroudlink" {
         match message.get("op").and_then(Value::as_str) {

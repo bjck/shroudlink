@@ -53,6 +53,7 @@ They work on the player's **backpack** slots, on menu screens (chest screen and 
 | `ToClient::Store { owner, data }` | keeps JSON on the player's PC for this server |
 | `ToClient::Section { owner, id, nodes }` | rows in the chest screen's backpack panel, below its title; no nodes removes them; events come as `ui_event` with `window = id` |
 | `ToClient::Notify { owner, text }` | a HUD message for 6 s |
+| `ToClient::Hud { owner, id, title, rows: [HudRow { label, value, fraction }] }` | a small see-through panel on the HUD (bottom right, also while playing); a gold bar under each row filled to `fraction` (0..1, 0: none); players drag it while a menu is open; no rows removes it. Send only changes |
 
 | Addon → server (`FromClient::from_message(message)`) | |
 |---|---|

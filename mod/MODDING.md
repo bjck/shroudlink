@@ -51,6 +51,10 @@ A mod can:
 - add rows to the chest screen's backpack panel (`Section`, any UI nodes; events come back
   as `ui_event` with the section id as window) and show short HUD messages (`Notify`).
   `examples/hello_mod` adds a "Wave" button that answers with a message.
+- show a small **HUD panel** (`Hud`: a title and rows of label, value and a gold bar filled
+  to `fraction`), also while playing, bottom right and see-through; players drag it while
+  a menu is open and the addon keeps where. Send it again when it changes, with no rows to
+  remove it; older addons ignore it. The damage meter's fight panel is one (`mods/meter`).
 
 - react to **game events**: `game_events()` names the types (e.g. "EntityDiedEvent",
   "PickupEvent", "LevelUpEvent"), and `on_game_event` gets each occurrence;

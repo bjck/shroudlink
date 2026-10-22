@@ -505,6 +505,12 @@ pub fn mouse_clicked() -> bool {
     MOUSE.lock().unwrap().click.is_some()
 }
 
+/// While the left button is held: where it was pressed and where the cursor is now.
+pub fn mouse_held() -> Option<((f32, f32), (f32, f32))> {
+    let m = MOUSE.lock().unwrap();
+    m.pressed_at.filter(|_| m.down).map(|at| (at, m.pos))
+}
+
 /// True when the cursor is inside `rect` (x, y, w, h).
 pub fn mouse_in(rect: [f32; 4]) -> bool {
     let (x, y) = mouse_pos();

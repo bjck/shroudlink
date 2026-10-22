@@ -13,6 +13,7 @@ usage:
   python gamectl.py hover <x> <y>            move the cursor there
   python gamectl.py shot <out.png>           screenshot of the game window
   python gamectl.py test locks               L on a backpack slot: rim on, rim off
+  python gamectl.py test hud                 a mod HUD panel: drawn, dragged in the backpack view, kept
   python gamectl.py test search              item search in a chest screen (one must be open)
   python gamectl.py goto <name>              teleport to the chest with that name, face it, open it
   python gamectl.py test all [name]          ensure in world, goto the chest (default "food"), test chest
@@ -71,6 +72,11 @@ class Addon:
 
     def state(self):
         return self.ask("state")
+
+    def ask_receive(self, message):
+        """Hands `message` to the addon as if the server had sent it."""
+        self.sock.sendall((json.dumps({"cmd": "receive", "message": message}) + "\n").encode())
+        return json.loads(self.reader.readline())
 
     def ask_send(self, message):
         """Has the addon send `message` to the server."""
@@ -164,6 +170,20 @@ def click(x, y):
 MOUSEEVENTF_MOVE = 0x0001
 
 
+def drag(x0, y0, x1, y1, steps=10):
+    """Left button down at (x0, y0), moved to (x1, y1) in steps, released (UI units)."""
+    hover(x0, y0)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, 0))))
+    time.sleep(0.15)
+    for i in range(1, steps + 1):
+        sx, sy = to_screen(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
+        user32.SetCursorPos(sx, sy)
+        time.sleep(0.05)
+    time.sleep(0.15)
+    send(INPUT(INPUT_MOUSE, _U(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, 0))))
+    time.sleep(0.3)
+
+
 def turn(dx, dy=0, steps=10):
     """Turns the camera with relative mouse movement (raw input), in small steps."""
     focus()
@@ -235,6 +255,54 @@ def test_locks(addon):
     key("L")
     addon.wait("the rim to go", lambda s: any(x["slot"] == slot["slot"] and x["mark"] is None for x in s["slots"]))
     print("PASS L again unlocks it")
+
+
+def game_dir():
+    """Folder of the running enshrouded.exe (the addon keeps its files there)."""
+    import subprocess
+    out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-Process enshrouded).Path"], capture_output=True, text=True).stdout.strip()
+    assert out, "the game is not running"
+    return Path(out.splitlines()[0]).parent
+
+
+def test_hud(addon):
+    """A mod HUD panel (sent locally, as if from the server): drawn bottom right while
+    playing, dragged in the backpack view, the position kept in shroudlink_hud.json."""
+    s = addon.state()
+    assert s["connected"], "the addon is not connected to a shroudlink server"
+    if s["screen"] != 0x01:
+        key("ESC")
+        addon.wait("gameplay", lambda s: s["screen"] == 0x01)
+    positions = game_dir() / "shroudlink_hud.json"
+    before = positions.read_text(encoding="utf-8") if positions.exists() else None
+    rows = [{"label": "You", "value": "1,240 (82)", "fraction": 1.0}, {"label": "A friend", "value": "620 (41)", "fraction": 0.5}]
+    addon.ask_receive({"mod": "ui", "op": "hud", "owner": "gamectl", "id": "test", "title": "Test panel", "rows": rows})
+    s = addon.wait("the panel drawn", lambda s: any(h["key"] == "gamectl/test" and h["rect"][2] > 0 for h in s["huds"]))
+    rect = next(h["rect"] for h in s["huds"] if h["key"] == "gamectl/test")
+    print(f"PASS panel drawn at {[round(v) for v in rect]}")
+    try:
+        key("B")
+        addon.wait("the backpack", lambda s: s["screen"] != 0x01)
+        time.sleep(2)
+        x, y = rect[0] + 40, rect[1] + 15
+        drag(x, y, x - 300, y - 200)
+        s = addon.wait("the panel moved", lambda s: any(h["key"] == "gamectl/test" and h["rect"][0] < rect[0] - 250 for h in s["huds"]))
+        moved = next(h["rect"] for h in s["huds"] if h["key"] == "gamectl/test")
+        print(f"PASS dragged to {[round(v) for v in moved]}")
+        saved = json.loads(positions.read_text(encoding="utf-8"))["gamectl/test"]
+        print(f"PASS position kept: {saved}")
+        # back where it was: the addon keeps positions in memory too
+        drag(moved[0] + 40, moved[1] + 15, rect[0] + 40, rect[1] + 15)
+        addon.wait("the panel back", lambda s: any(h["key"] == "gamectl/test" and abs(h["rect"][0] - rect[0]) < 2 for h in s["huds"]))
+        key("ESC")
+    finally:
+        addon.ask_receive({"mod": "ui", "op": "hud", "owner": "gamectl", "id": "test", "title": "", "rows": []})
+        if before is None:
+            positions.unlink(missing_ok=True)
+        else:
+            positions.write_text(before, encoding="utf-8")
+    addon.wait("the panel removed", lambda s: not any(h["key"] == "gamectl/test" for h in s["huds"]))
+    print("PASS no rows removes it")
 
 
 def test_search(addon):
@@ -500,7 +568,7 @@ def main():
         goto_chest(addon, args[2] if len(args) > 2 else "food")
         test_chest(addon)
     elif cmd == "test":
-        {"locks": test_locks, "search": test_search, "chest": test_chest}[args[1]](Addon())
+        {"locks": test_locks, "search": test_search, "chest": test_chest, "hud": test_hud}[args[1]](Addon())
     else:
         raise SystemExit(__doc__)
 

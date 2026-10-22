@@ -69,13 +69,21 @@ fn answer(request: &str) -> Value {
             }
             None => json!({ "error": "send needs a message" }),
         },
+        // a message from the server, as if a mod had sent it (UI tests without a mod)
+        Some("receive") => match request.get("message") {
+            Some(message) => {
+                crate::link::dispatch(message);
+                json!({ "received": true })
+            }
+            None => json!({ "error": "receive needs a message" }),
+        },
         Some("log") => {
             let n = request.get("lines").and_then(Value::as_u64).unwrap_or(20) as usize;
             let text = std::fs::read_to_string(chestsort_common::game_dir().join("shroudlink_client.log")).unwrap_or_default();
             let lines: Vec<&str> = text.lines().rev().take(n).collect();
             json!({ "lines": lines.into_iter().rev().collect::<Vec<_>>() })
         }
-        _ => json!({ "error": "unknown command; use state, ping, send or log" }),
+        _ => json!({ "error": "unknown command; use state, ping, send, receive or log" }),
     }
 }
 

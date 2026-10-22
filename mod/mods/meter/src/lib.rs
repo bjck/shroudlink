@@ -2,7 +2,8 @@
 //! for the last fight and the session, plus "what killed me" (the last killing blows and
 //! the hits before them). Counted on the server from the game's own hit events, so players
 //! without the addon are counted too; the addon shows it (MODS -> Damage meter) and a short
-//! message after each fight. Built from the SDK: game events, `players`, `component`,
+//! message after each fight, and a small panel on the HUD with the fight's damage per
+//! player as bars (can be switched off on the meter's page). Built from the SDK: game events, `players`, `component`,
 //! `player_of`, `on_tick`.
 
 mod tally;
@@ -10,7 +11,7 @@ mod tally;
 use std::collections::HashSet;
 use std::time::Instant;
 
-use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink_sdk::ui::{Event, FromClient, HudRow, MenuEntry, Node, ToClient, UiEvent, Window};
 use shroudlink_sdk::{export_mod, log, Events, GameEvent, Host, Mod, Value, World};
 
 use tally::{damage_type_names, Death, Fight, Hit, Tally};
@@ -35,6 +36,8 @@ const FACTIONS: [&str; 16] = [
 ];
 /// The first hits involving players are logged raw, to check the field reading in game.
 const LOGGED_HITS: u32 = 40;
+/// Players shown in the HUD panel.
+const HUD_ROWS: usize = 5;
 
 #[derive(Default)]
 pub struct Meter {
@@ -43,6 +46,10 @@ pub struct Meter {
     players: HashSet<u32>,
     clients: Vec<u64>,
     logged: u32,
+    /// clients that switched the HUD panel off (stored on their PC)
+    hud_off: HashSet<u64>,
+    /// what each client's HUD panel shows, to send only changes
+    hud_sent: Vec<(u64, Value)>,
 }
 
 impl Meter {
@@ -106,8 +113,55 @@ impl Meter {
                 content.extend(deaths.iter().map(|d| Node::Text { text: describe_death(d, now) }));
             }
         }
+        content.push(Node::Toggle { id: "hud".into(), label: "Damage panel on the HUD (drag it while a menu is open)".into(), value: !self.hud_off.contains(&client) });
         content.push(Node::Row { children: vec![Node::Button { id: "refresh".into(), label: "Refresh".into() }, Node::Button { id: "reset".into(), label: "Reset session".into() }] });
         ToClient::Open { owner: ID.into(), window: Window { id: "main".into(), title: "Damage meter".into(), content } }
+    }
+
+    /// The HUD panel for `client`: the fight going on (or the last one), damage per player
+    /// as bars relative to the top damage. None: nothing to show.
+    fn hud(&self, world: &World, client: u64) -> Option<ToClient> {
+        let mut fights: Vec<(u32, Fight, bool)> = self.tally.fights();
+        fights.retain(|(_, f, _)| f.totals.damage > 0);
+        if fights.is_empty() {
+            return None;
+        }
+        fights.sort_by(|a, b| b.1.totals.damage.cmp(&a.1.totals.damage).then(a.0.cmp(&b.0)));
+        fights.truncate(HUD_ROWS);
+        let top = fights[0].1.totals.damage as f32;
+        let going_on = fights.iter().any(|(_, _, active)| *active);
+        let seconds = fights.iter().map(|(_, f, _)| f.seconds()).fold(0.0, f64::max);
+        let title = format!("{} - {seconds:.0} s", if going_on { "Damage" } else { "Last fight" });
+        let rows = fights
+            .iter()
+            .map(|(id, f, _)| HudRow { label: Self::name(world, client, *id), value: format!("{} ({})", num(f.totals.damage), num(f.dps() as u64)), fraction: f.totals.damage as f32 / top })
+            .collect();
+        Some(ToClient::Hud { owner: ID.into(), id: "dps".into(), title, rows })
+    }
+
+    /// Sends each client its HUD panel when it changed (an empty one removes it).
+    fn send_huds(&mut self, host: &mut Host) {
+        let messages: Vec<(u64, Value)> = {
+            let world = host.world();
+            self.clients
+                .iter()
+                .map(|&client| {
+                    let hud = if self.hud_off.contains(&client) { None } else { self.hud(&world, client) };
+                    (client, hud.unwrap_or_else(|| ToClient::Hud { owner: ID.into(), id: "dps".into(), title: String::new(), rows: Vec::new() }).to_message())
+                })
+                .collect()
+        };
+        for (client, message) in messages {
+            let sent = self.hud_sent.iter_mut().find(|(c, _)| *c == client);
+            match sent {
+                Some((_, last)) if *last == message => continue,
+                Some((_, last)) => *last = message.clone(),
+                // nothing shown yet: an empty panel need not be sent
+                None if message["rows"].as_array().is_some_and(|r| r.is_empty()) => continue,
+                None => self.hud_sent.push((client, message.clone())),
+            }
+            host.send(client, &message);
+        }
     }
 
     fn on_hit(&mut self, events: &Events, event: &GameEvent) {
@@ -122,6 +176,11 @@ impl Meter {
         }
         let involves_player = self.players.contains(&source) || self.players.contains(&target);
         if !involves_player {
+            return;
+        }
+        // harvesting (trees, rocks, ore) comes as hits on terrain and props: only creatures,
+        // which have a faction, count as damage dealt
+        if self.players.contains(&source) && !self.players.contains(&target) && events.world().component(target, "Faction").is_none() {
             return;
         }
         if self.logged < LOGGED_HITS {
@@ -223,13 +282,32 @@ impl Mod for Meter {
         }
         let entries = ToClient::Entries { owner: ID.into(), entries: vec![MenuEntry { id: "open".into(), label: "Damage meter".into() }] };
         host.send(client, &entries.to_message());
+        // a panel from before a restart or reload of this mod would stay up
+        self.hud_sent.retain(|(c, _)| *c != client);
+        host.send(client, &ToClient::Hud { owner: ID.into(), id: "dps".into(), title: String::new(), rows: Vec::new() }.to_message());
     }
 
     fn on_message(&mut self, host: &mut Host, client: u64, message: &Value) {
+        if let Some(FromClient::Stored { data }) = FromClient::from_message(message) {
+            if data.get("hud") == Some(&Value::Bool(false)) {
+                self.hud_off.insert(client);
+            }
+            return;
+        }
         let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
         match (node.as_str(), event) {
             ("open", Event::Menu) | ("refresh", Event::Click { .. }) => {}
             ("reset", Event::Click { .. }) => self.tally.reset(),
+            ("hud", Event::Change { value }) => {
+                let on = value.as_bool().unwrap_or(true);
+                if on {
+                    self.hud_off.remove(&client);
+                } else {
+                    self.hud_off.insert(client);
+                }
+                host.send(client, &ToClient::Store { owner: ID.into(), data: shroudlink_sdk::json!({ "hud": on }) }.to_message());
+                self.send_huds(host);
+            }
             _ => return,
         }
         let window = self.window(host, client);
@@ -238,6 +316,8 @@ impl Mod for Meter {
 
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
         self.clients.retain(|&c| c != client);
+        self.hud_off.remove(&client);
+        self.hud_sent.retain(|(c, _)| *c != client);
     }
 
     fn game_events(&self) -> Vec<&'static str> {
@@ -266,6 +346,7 @@ impl Mod for Meter {
                 host.send(client, &ToClient::Notify { owner: ID.into(), text: summary(&fight) }.to_message());
             }
         }
+        self.send_huds(host);
     }
 }
 
@@ -296,6 +377,34 @@ mod tests {
         let before = Hit { amount: 60, killing_blow: false, crit: false, ..blow.clone() };
         let death = Death { at: 10.0, hits: vec![blow, before] };
         assert_eq!(describe_death(&death, 40.0), "30 s ago: 340 fire damage (critical) from a Scavenger (level 12), after 60 more damage in 1 hit(s)");
+    }
+
+    #[test]
+    fn the_hud_shows_the_fight_as_bars_and_can_be_switched_off() {
+        let mut m = Meter::default();
+        let mut host = MockHost::default();
+        m.on_join(&mut host.host(), 1);
+        host.take_sent();
+        m.on_tick(&mut host.host());
+        assert!(host.take_sent().is_empty(), "no fight, no panel");
+        let players = |e: u32| e == 7 || e == 8;
+        let hit = |source, amount| Hit { source, target: 99, amount, healing: false, killing_blow: false, crit: false, damage_types: 0, attacker: String::new() };
+        m.tally.hit(0.0, &hit(7, 300), players);
+        m.tally.hit(2.0, &hit(8, 600), players);
+        m.on_tick(&mut host.host());
+        let sent = host.take_sent();
+        let hud = &sent.last().unwrap().1;
+        assert_eq!(hud["op"], "hud");
+        assert_eq!(hud["rows"][0]["label"], "Player 8");
+        assert_eq!(hud["rows"][0]["fraction"], 1.0);
+        assert_eq!(hud["rows"][1]["fraction"], 0.5);
+        m.on_tick(&mut host.host());
+        assert!(host.take_sent().is_empty(), "unchanged: not sent again");
+        let off = UiEvent { window: "main".into(), node: "hud".into(), event: Event::Change { value: Value::Bool(false) } };
+        m.on_message(&mut host.host(), 1, &off.to_message(ID));
+        let sent = host.take_sent();
+        assert!(sent.iter().any(|(_, m)| m["op"] == "store" && m["data"]["hud"] == false));
+        assert!(sent.iter().any(|(_, m)| m["op"] == "hud" && m["rows"].as_array().unwrap().is_empty()), "switched off: removed");
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use chestsort_common::log;
 use serde_json::Value;
-use shroudlink::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink::ui::{Event, HudRow, MenuEntry, Node, ToClient, UiEvent, Window};
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -28,10 +28,30 @@ pub struct UiState {
     sections: Vec<(String, String, Vec<Node>)>,
     /// HUD messages and when they arrived
     notes: Vec<(String, Instant)>,
+    /// HUD panels of mods, drawn in this order
+    huds: Vec<Hud>,
+    /// The HUD panel being dragged: its key and its offsets when the drag began
+    drag: Option<(String, (f32, f32))>,
     last_screen: u8,
 }
 
-pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), last_screen: 0 });
+#[derive(Clone)]
+struct Hud {
+    owner: String,
+    id: String,
+    title: String,
+    rows: Vec<HudRow>,
+    /// where it was drawn last (UI units), for test automation
+    rect: [f32; 4],
+}
+
+impl Hud {
+    fn key(&self) -> String {
+        format!("{}/{}", self.owner, self.id)
+    }
+}
+
+pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), huds: Vec::new(), drag: None, last_screen: 0 });
 
 /// What the UI shows, for test automation.
 pub fn snapshot() -> Value {
@@ -43,6 +63,7 @@ pub fn snapshot() -> Value {
         "windows": ui.windows.iter().map(|w| serde_json::json!({ "owner": w.owner, "id": w.window.id, "title": w.window.title })).collect::<Vec<_>>(),
         "sections": ui.sections.iter().map(|(o, i, _)| format!("{o}/{i}")).collect::<Vec<_>>(),
         "notes": ui.notes.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
+        "huds": ui.huds.iter().map(|h| serde_json::json!({ "key": h.key(), "title": h.title, "rect": h.rect, "rows": h.rows.iter().map(|r| format!("{} {}", r.label, r.value)).collect::<Vec<_>>() })).collect::<Vec<_>>(),
         "search": SEARCH.lock().unwrap().clone(),
         "search_open": SEARCH_OPEN.load(Ordering::Relaxed),
     })
@@ -53,6 +74,23 @@ const NOTE_SECONDS: u64 = 6;
 const NOTES_MAX: usize = 4;
 /// Width of mod sections in the backpack panel (the search field's row).
 const SECTION_WIDTH: f32 = 530.0;
+
+/// HUD panels: width, background (plain blue panel, see-through), bars, and the default
+/// distance from the bottom right corner (above the game's own HUD there).
+const HUD_WIDTH: f32 = 340.0;
+const HUD_PADDING: [f32; 4] = [14.0, 8.0, 14.0, 10.0];
+const HUD_STYLE: u32 = 5;
+const HUD_ALPHA: f32 = 0.55;
+const HUD_BAR_HEIGHT: f32 = 10.0;
+/// Style 0 draws a thin gold line with round ends (4 to 7 are blue strips that spill
+/// out to the left, 8 to 10 gold ornaments and frames).
+const HUD_BAR_STYLE: u32 = 0;
+const HUD_BAR_ALPHA: f32 = 1.0;
+/// Labels longer than this are cut, so they do not run into the value.
+const HUD_LABEL_CHARS: usize = 16;
+const HUD_OFFSET: (f32, f32) = (40.0, 260.0);
+/// Where the player dragged HUD panels to: `{"meter/dps": [right, bottom]}` in UI units.
+const HUD_FILE: &str = "shroudlink_hud.json";
 
 /// Gameplay without a menu; every other screen (journal 0x04, inventories, ...) shows a cursor.
 const SCREEN_GAMEPLAY: u8 = 0x01;
@@ -202,6 +240,18 @@ fn handle(message: &Value) {
                 ui.sections.push((owner, id, nodes));
             }
         }
+        ToClient::Hud { owner, id, title, rows } => {
+            let at = ui.huds.iter().position(|h| h.owner == owner && h.id == id);
+            match (at, rows.is_empty()) {
+                (Some(i), true) => drop(ui.huds.remove(i)),
+                (Some(i), false) => (ui.huds[i].title, ui.huds[i].rows) = (title, rows),
+                (None, false) => {
+                    log!("ui: {owner} shows HUD panel {id}");
+                    ui.huds.push(Hud { owner, id, title, rows, rect: [0.0; 4] });
+                }
+                (None, true) => {}
+            }
+        }
         ToClient::Notify { owner, text } => {
             log!("ui: {owner} notifies \"{text}\"");
             ui.notes.push((text, Instant::now()));
@@ -293,6 +343,7 @@ pub fn draw(api: &Api) {
                 draw_page(&mut d, &mut ui, &mut pending);
             } else {
                 draw_notes(&mut d, &ui.notes);
+                draw_huds(&mut d, &mut ui, screen != SCREEN_GAMEPLAY);
             }
         }
         for (owner, id) in &pending.closed {
@@ -364,6 +415,122 @@ unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)]) {
     api.close_frame(&mut column);
     api.close_frame(&mut root_frame);
     api.end_layer(&mut layer);
+}
+
+static HUD_POSITIONS: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);
+
+fn hud_offset(key: &str) -> (f32, f32) {
+    let mut positions = HUD_POSITIONS.lock().unwrap();
+    let positions = positions.get_or_insert_with(|| {
+        std::fs::read_to_string(chestsort_common::game_dir().join(HUD_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    });
+    positions.get(key).and_then(|v| Some((v.get(0)?.as_f64()? as f32, v.get(1)?.as_f64()? as f32))).unwrap_or(HUD_OFFSET)
+}
+
+fn set_hud_offset(key: &str, (right, bottom): (f32, f32), save: bool) {
+    let mut positions = HUD_POSITIONS.lock().unwrap();
+    let positions = positions.get_or_insert_with(Default::default);
+    positions.insert(key.to_owned(), serde_json::json!([right.round(), bottom.round()]));
+    if save {
+        let _ = std::fs::write(chestsort_common::game_dir().join(HUD_FILE), serde_json::to_string_pretty(positions).unwrap_or_default());
+    }
+}
+
+/// Mod panels on the HUD, bottom right. While a menu shows the cursor they sit above it
+/// and can be dragged anywhere; the addon keeps where.
+unsafe fn draw_huds(d: &mut Draw, ui: &mut UiState, menu: bool) {
+    let api = d.api;
+    let inner = HUD_WIDTH - HUD_PADDING[0] - HUD_PADDING[2];
+    for hud in ui.huds.clone() {
+        let key = hud.key();
+        let (right, bottom) = hud_offset(&key);
+        let mut layer = Layer::new();
+        let root = api.begin_layer(&mut layer, &ident("shroudlinkHud", &key, 0), if menu { LAYER_POPUP } else { LAYER_HUD });
+        let mut root_frame = Frame::new();
+        api.open_root(&mut root_frame, root);
+        let mut column = Frame::new();
+        api.open_column(&mut column, &ident("shroudlinkHudColumn", &key, 0), 0.0);
+        api.set_alignment(&column, 0x0303);
+        api.set_padding(&column, [0.0, 0.0, right, bottom]);
+        let height = HUD_PADDING[1] + HUD_PADDING[3] + TEXT_HEIGHT + hud.rows.iter().map(|r| TEXT_HEIGHT + if r.fraction > 0.0 { HUD_BAR_HEIGHT } else { 0.0 }).sum::<f32>();
+        let mut panel = Frame::new();
+        api.open_column(&mut panel, &ident("shroudlinkHudPanel", &key, 0), 0.0);
+        api.set_size(&panel, HUD_WIDTH, height);
+        api.set_padding(&panel, HUD_PADDING);
+        api.background(&mut panel, HUD_STYLE, HUD_ALPHA);
+        api.text(&hud.title, STYLE_TAB_TEXT);
+        for (i, row) in hud.rows.iter().enumerate() {
+            let i = i as u64;
+            let mut line = Frame::new();
+            api.open_row(&mut line, &ident("shroudlinkHudLine", &key, i), 0.0);
+            api.set_size(&line, inner, TEXT_HEIGHT);
+            let mut label = Frame::new();
+            api.open_column(&mut label, &ident("shroudlinkHudLabel", &key, i), 0.0);
+            api.set_size(&label, inner * 0.62, TEXT_HEIGHT);
+            api.text(&clip(&row.label, HUD_LABEL_CHARS), STYLE_TITLE);
+            api.close_frame(&mut label);
+            let mut value = Frame::new();
+            api.open_column(&mut value, &ident("shroudlinkHudValue", &key, i), 0.0);
+            api.set_size(&value, inner * 0.38, TEXT_HEIGHT);
+            // right-aligned: a column fitting the text, at the end of the fixed one
+            let mut fit = Frame::new();
+            api.open_column(&mut fit, &ident("shroudlinkHudValueText", &key, i), 0.0);
+            api.set_alignment(&fit, 0x0103);
+            api.text(&row.value, STYLE_TITLE);
+            api.close_frame(&mut fit);
+            api.close_frame(&mut value);
+            api.close_frame(&mut line);
+            if row.fraction > 0.0 {
+                let mut bar = Frame::new();
+                api.open_row(&mut bar, &ident("shroudlinkHudBar", &key, i), 0.0);
+                api.set_size(&bar, (inner * row.fraction.min(1.0)).max(2.0), HUD_BAR_HEIGHT);
+                api.background(&mut bar, HUD_BAR_STYLE, HUD_BAR_ALPHA);
+                api.close_frame(&mut bar);
+            }
+        }
+        let rect = api.rect(&panel);
+        api.close_frame(&mut panel);
+        api.close_frame(&mut column);
+        api.close_frame(&mut root_frame);
+        api.end_layer(&mut layer);
+        if let Some(h) = ui.huds.iter_mut().find(|h| h.key() == key) {
+            h.rect = rect;
+        }
+        drag_hud(ui, &key, rect, (right, bottom), menu);
+    }
+}
+
+/// `text` cut to `max` characters, with an ellipsis.
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut cut: String = text.chars().take(max - 1).collect();
+    cut.push('…');
+    cut
+}
+
+/// Drags a HUD panel while the button is held after a press inside it (menus only).
+fn drag_hud(ui: &mut UiState, key: &str, rect: [f32; 4], offset: (f32, f32), menu: bool) {
+    let inside = |(x, y): (f32, f32)| x >= rect[0] && x < rect[0] + rect[2] && y >= rect[1] && y < rect[1] + rect[3];
+    match crate::native::mouse_held().filter(|_| menu) {
+        Some((at, pos)) => {
+            if ui.drag.is_none() && inside(at) {
+                ui.drag = Some((key.to_owned(), offset));
+            }
+            if let Some((_, (right, bottom))) = ui.drag.as_ref().filter(|(k, _)| k == key) {
+                set_hud_offset(key, ((right - (pos.0 - at.0)).max(0.0), (bottom - (pos.1 - at.1)).max(0.0)), false);
+            }
+        }
+        None => {
+            if ui.drag.as_ref().is_some_and(|(k, _)| k == key) {
+                ui.drag = None;
+                let offset = hud_offset(key);
+                set_hud_offset(key, offset, true);
+                log!("ui: HUD panel {key} moved to {offset:?}");
+            }
+        }
+    }
 }
 
 /// Called inside the backpack panel's column right before its slot grid: the open search

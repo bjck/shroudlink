@@ -16,6 +16,7 @@
 //!                   `{"mod":"ui","op":"store","owner":"chestsort","data":{...}}`
 //!                   `{"mod":"ui","op":"section","owner":"hello","id":"wave","nodes":[...]}`
 //!                   `{"mod":"ui","op":"notify","owner":"hello","text":"..."}`
+//!                   `{"mod":"ui","op":"hud","owner":"meter","id":"dps","title":"..","rows":[...]}`
 //! client -> server  `{"mod":"chestsort","op":"slot_key","key":"L","slot":..,"position":[page,index],"item":..}`
 //!                   `{"mod":"chestsort","op":"stored","data":{...}}`   after the welcome, if stored
 //!                   `{"mod":"chestsort","op":"layout","pages":[...]}`  backpack page entities in display order
@@ -51,6 +52,16 @@ pub enum Node {
     ItemGrid { id: String, columns: u8, items: Vec<Item> },
     /// Selectable text rows; `click` reports the index.
     List { id: String, entries: Vec<String> },
+}
+
+/// A line of a HUD panel: label on the left, value on the right, over a bar filled to
+/// `fraction` (0..1; 0 draws no bar).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct HudRow {
+    pub label: String,
+    pub value: String,
+    #[serde(default)]
+    pub fraction: f32,
 }
 
 /// An entry the addon offers in its mod menu (opened with the addon hotkey).
@@ -102,6 +113,9 @@ pub enum ToClient {
     Section { owner: String, id: String, nodes: Vec<Node> },
     /// A short message shown on the HUD for a few seconds.
     Notify { owner: String, text: String },
+    /// A small panel on the HUD, also while playing (bottom right; the player can drag it
+    /// while a menu shows the cursor). Replaces the owner's panel `id`; no rows removes it.
+    Hud { owner: String, id: String, title: String, rows: Vec<HudRow> },
 }
 
 /// A message the addon sends to a mod about inventory slots.
@@ -209,6 +223,17 @@ mod tests {
         assert_eq!(msg["position"], serde_json::json!([5, 6]));
         assert_eq!(FromClient::from_message(&msg), Some(key));
         assert_eq!(FromClient::from_message(&serde_json::json!({ "mod": "x", "op": "ui_event" })), None);
+    }
+
+    #[test]
+    fn hud_json_shape() {
+        let hud = ToClient::Hud { owner: "meter".into(), id: "dps".into(), title: "DPS".into(), rows: vec![HudRow { label: "You".into(), value: "120".into(), fraction: 1.0 }] };
+        let msg = hud.to_message();
+        assert_eq!(msg["op"], "hud");
+        assert_eq!(msg["rows"][0]["fraction"], 1.0);
+        let mut back = msg.clone();
+        back.as_object_mut().unwrap().remove("mod");
+        assert_eq!(serde_json::from_value::<ToClient>(back).unwrap(), hud);
     }
 
     #[test]

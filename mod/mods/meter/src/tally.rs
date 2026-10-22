@@ -173,6 +173,11 @@ impl Tally {
         rows
     }
 
+    /// Each player's fight going on (true) or else their last one.
+    pub fn fights(&self) -> Vec<(u32, Fight, bool)> {
+        self.players.iter().filter_map(|(&id, p)| p.fight.clone().map(|f| (id, f, true)).or_else(|| p.last_fight.clone().map(|f| (id, f, false)))).collect()
+    }
+
     pub fn deaths(&self, player: u32) -> Vec<Death> {
         self.players.get(&player).map(|p| p.deaths.iter().cloned().collect()).unwrap_or_default()
     }
