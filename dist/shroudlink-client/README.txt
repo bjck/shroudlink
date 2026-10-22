@@ -20,6 +20,9 @@ WHAT YOU GET
     Chest categories - which chest name takes which items, item search
     Storage - everything in the chests within 40 m as one box; click an item
               to take it from all of them
+    Damage meter - damage dealt, damage taken and healing for everyone, for
+              the last fight and the whole session, and what killed you.
+              Other players see your Steam name there.
 
 If two players join at the very same moment, the locks of one of them may only
 show after opening a chest once.

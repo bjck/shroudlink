@@ -3,7 +3,7 @@ resolver = "2"
 members = ["client", "common", "examples/hello_mod", "link", "mods/chestsort", "mods/lantern", "mods/meter", "mods/storage", "mods/travel", "sdk", "server"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 
