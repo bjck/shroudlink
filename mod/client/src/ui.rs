@@ -63,6 +63,7 @@ pub fn snapshot() -> Value {
         "windows": ui.windows.iter().map(|w| serde_json::json!({ "owner": w.owner, "id": w.window.id, "title": w.window.title })).collect::<Vec<_>>(),
         "sections": ui.sections.iter().map(|(o, i, _)| format!("{o}/{i}")).collect::<Vec<_>>(),
         "notes": ui.notes.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
+        "off": crate::switches::off(),
         "huds": ui.huds.iter().map(|h| serde_json::json!({ "key": h.key(), "title": h.title, "rect": h.rect, "rows": h.rows.iter().map(|r| format!("{} {}", r.label, r.value)).collect::<Vec<_>>() })).collect::<Vec<_>>(),
         "search": SEARCH.lock().unwrap().clone(),
         "search_open": SEARCH_OPEN.load(Ordering::Relaxed),
@@ -254,6 +255,9 @@ fn handle(message: &Value) {
         }
         ToClient::Notify { owner, text } => {
             log!("ui: {owner} notifies \"{text}\"");
+            if !crate::switches::is_on(&owner) {
+                return;
+            }
             ui.notes.push((text, Instant::now()));
             let excess = ui.notes.len().saturating_sub(NOTES_MAX);
             ui.notes.drain(..excess);
@@ -441,7 +445,7 @@ fn set_hud_offset(key: &str, (right, bottom): (f32, f32), save: bool) {
 unsafe fn draw_huds(d: &mut Draw, ui: &mut UiState, menu: bool) {
     let api = d.api;
     let inner = HUD_WIDTH - HUD_PADDING[0] - HUD_PADDING[2];
-    for hud in ui.huds.clone() {
+    for hud in ui.huds.clone().into_iter().filter(|h| crate::switches::is_on(&h.owner)) {
         let key = hud.key();
         let (right, bottom) = hud_offset(&key);
         let mut layer = Layer::new();
@@ -542,7 +546,7 @@ pub fn before_backpack_grid(api: &Api) {
     let mut pending = Pending { events: Vec::new(), closed: Vec::new() };
     {
         let mut ui = UI.lock().unwrap();
-        for (owner, id, nodes) in ui.sections.iter_mut() {
+        for (owner, id, nodes) in ui.sections.iter_mut().filter(|(owner, _, _)| crate::switches::is_on(owner)) {
             unsafe {
                 let height: f32 = nodes.iter().map(node_height).sum::<f32>() + SPACING * nodes.len() as f32;
                 let mut column = Frame::new();
@@ -688,11 +692,35 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     api.set_size(&list, PAGE_LIST_WIDTH, PAGE_HEIGHT - PADDING[1] - PADDING[3]);
     api.text("Server mods", STYLE_TITLE);
     let selected = PAGE_SELECTED.load(Ordering::Relaxed) as usize;
+    let mut toggled = None;
     for (i, (owner, entry)) in ui.menu.iter().enumerate() {
-        let label = if i == selected { format!("» {}", entry.label) } else { entry.label.clone() };
-        if api.text_button(&label, STYLE_TAB_TEXT, ident("shroudlinkModEntry", &format!("{owner}/{}", entry.id), 0).id()) {
+        let on = crate::switches::is_on(owner);
+        let scope = format!("{owner}/{}", entry.id);
+        let mut row = Frame::new();
+        api.open_row(&mut row, &ident("shroudlinkModRow", &scope, 0), 8.0);
+        api.set_size(&row, PAGE_LIST_WIDTH, TEXT_HEIGHT);
+        // the switch: a mod switched off stays listed, so it can be switched on again
+        if api.text_button(if on { "[x]" } else { "[ ]" }, STYLE_TAB_TEXT, ident("shroudlinkModSwitch", &scope, 0).id()) {
+            toggled = Some(owner.clone());
+        }
+        let label = match (i == selected, on) {
+            (true, _) => format!("» {}", entry.label),
+            (false, true) => entry.label.clone(),
+            (false, false) => format!("{} (off)", entry.label),
+        };
+        if api.text_button(&label, STYLE_TAB_TEXT, ident("shroudlinkModEntry", &scope, 0).id()) {
             PAGE_SELECTED.store(i as u64, Ordering::Relaxed);
             save_page();
+            if on {
+                pending.events.push((owner.clone(), UiEvent { window: String::new(), node: entry.id.clone(), event: Event::Menu }));
+            }
+        }
+        api.close_frame(&mut row);
+    }
+    if let Some(owner) = toggled {
+        crate::switches::toggle(&owner);
+        // switched on while shown: the mod refreshes its window
+        if let Some((_, entry)) = ui.menu.get(selected).filter(|(o, _)| *o == owner && crate::switches::is_on(o)) {
             pending.events.push((owner.clone(), UiEvent { window: String::new(), node: entry.id.clone(), event: Event::Menu }));
         }
     }
@@ -708,7 +736,11 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     let mut content = Frame::new();
     api.open_column(&mut content, &d.key("shroudlinkPageContent"), SPACING);
     api.set_size(&content, width, PAGE_HEIGHT - PADDING[1] - PADDING[3]);
-    for w in ui.windows.iter_mut().filter(|w| Some(&w.owner) == owner.as_ref()) {
+    if let Some((_, entry)) = ui.menu.get(selected).filter(|(o, _)| !crate::switches::is_on(o)) {
+        api.text(&format!("{} is switched off on this PC", entry.label), STYLE_TITLE);
+        api.text("Its windows, panels, marks and keys are hidden here; on the server it keeps running. Tick [ ] to switch it on.", STYLE_TAB_TEXT);
+    }
+    for w in ui.windows.iter_mut().filter(|w| Some(&w.owner) == owner.as_ref() && crate::switches::is_on(&w.owner)) {
         api.text(&w.window.title, STYLE_TITLE);
         let window_id = w.window.id.clone();
         for (i, node) in w.window.content.iter_mut().enumerate() {

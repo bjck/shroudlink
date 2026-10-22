@@ -68,7 +68,8 @@ pub fn position_of(slot: u64) -> Option<Position> {
 pub fn mark_of(slot: u64) -> Option<MarkStyle> {
     with(|s| {
         let mut style = None;
-        for mark in s.marks.values().flatten().filter(|m| m.slots.contains(&slot)) {
+        let on = s.marks.iter().filter(|(owner, _)| crate::switches::is_on(owner)).flat_map(|(_, marks)| marks);
+        for mark in on.filter(|m| m.slots.contains(&slot)) {
             if style != Some(MarkStyle::Rim) {
                 style = Some(mark.style);
             }
@@ -77,14 +78,15 @@ pub fn mark_of(slot: u64) -> Option<MarkStyle> {
     })
 }
 
-/// Letters mods registered as slot keys, as a bit mask (bit 0 = A).
+/// Letters mods registered as slot keys, as a bit mask (bit 0 = A); not those of mods
+/// the player switched off.
 fn key_mask(s: &State) -> u32 {
-    s.keys.values().flatten().filter_map(|k| k.key.chars().next()).filter(char::is_ascii_alphabetic).fold(0, |m, c| m | 1 << (c.to_ascii_uppercase() as u8 - b'A'))
+    s.keys.iter().filter(|(owner, _)| crate::switches::is_on(owner)).flat_map(|(_, keys)| keys).filter_map(|k| k.key.chars().next()).filter(char::is_ascii_alphabetic).fold(0, |m, c| m | 1 << (c.to_ascii_uppercase() as u8 - b'A'))
 }
 
 /// A registered key was pressed over a backpack slot: tell the mods that registered it.
 pub fn key_pressed(key: char, slot: u64, position: Position, item: u32) {
-    let owners: Vec<String> = with(|s| s.keys.iter().filter(|(_, keys)| keys.iter().any(|k| k.key.eq_ignore_ascii_case(&key.to_string()))).map(|(o, _)| o.clone()).collect());
+    let owners: Vec<String> = with(|s| s.keys.iter().filter(|(owner, _)| crate::switches::is_on(owner)).filter(|(_, keys)| keys.iter().any(|k| k.key.eq_ignore_ascii_case(&key.to_string()))).map(|(o, _)| o.clone()).collect());
     for owner in owners {
         log!("slots: {key} on slot {} of page {} for {owner}", position.1, position.0);
         let event = FromClient::SlotKey { key: key.to_ascii_uppercase().to_string(), slot, position, item };
@@ -134,6 +136,11 @@ fn owners(s: &State) -> Vec<String> {
     owners.sort();
     owners.dedup();
     owners
+}
+
+/// Arms the slot keys again (a mod was switched on or off).
+pub fn arm_keys() {
+    crate::input::arm_slot_keys(with(|s| key_mask(s)));
 }
 
 pub fn set_keys(owner: String, keys: Vec<SlotKey>) {

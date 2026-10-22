@@ -55,6 +55,10 @@ A mod can:
   to `fraction`), also while playing, bottom right and see-through; players drag it while
   a menu is open and the addon keeps where. Send it again when it changes, with no rows to
   remove it; older addons ignore it. The damage meter's fight panel is one (`mods/meter`).
+- players can switch a mod off in their addon (the [X] in the MODS page list, since 0.5.0):
+  the addon then hides that mod's windows, backpack rows, HUD panels and messages and slot
+  marks, and ignores its slot keys. Your mod is not told and keeps running for that player,
+  so keep the server side correct without the UI (chestsort's locks still protect slots).
 
 - react to **game events**: `game_events()` names the types (e.g. "EntityDiedEvent",
   "PickupEvent", "LevelUpEvent"), and `on_game_event` gets each occurrence;
