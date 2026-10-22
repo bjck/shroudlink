@@ -161,6 +161,12 @@ fn addon_layout(client: ClientId, message: &Value) {
     }
 }
 
+/// The Steam name an addon sent: no control characters, at most 32 characters.
+fn player_name(message: &Value) -> Option<String> {
+    let name: String = message.get("name")?.as_str()?.chars().filter(|c| !c.is_control()).take(32).collect();
+    (!name.trim().is_empty()).then_some(name)
+}
+
 /// Swaps in a new build of a mod (hot reload) and welcomes the connected clients again.
 pub(crate) fn replace(host: &mut Host, mut m: Box<dyn ServerMod>) {
     let clients = host.clients();
@@ -254,8 +260,13 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("hello_again") => join(host, client),
             Some("identify") => {
                 let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
-                let name = message.get("name").and_then(Value::as_str).map(|n| n.chars().filter(|c| !c.is_control()).take(32).collect::<String>());
-                crate::world::identify(client.0, &pages, name.filter(|n| !n.trim().is_empty()));
+                crate::world::identify(client.0, &pages, player_name(message));
+            }
+            Some("name") => {
+                if let Some(name) = player_name(message) {
+                    log!("shroudlink: client {:016x} is {name}", client.0);
+                    crate::world::name_client(client.0, name);
+                }
             }
             // test automation (only with a shroudlink_probe file): players, positions, teleport
             Some("debug_players") if crate::game_events::probing() => {

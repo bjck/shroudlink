@@ -220,9 +220,11 @@ def test_locks(addon):
     """L over a backpack slot in the inventory: rim on, rim off."""
     s = addon.state()
     assert s["connected"], "the addon is not connected to a shroudlink server"
-    if not s["slots"]:
+    if s["screen"] == 0x01:  # playing: the slots on screen are the HUD's action bar
         key("B")  # backpack tab of the player menu
-        s = addon.wait("backpack slots on screen", lambda s: s["slots"])
+        addon.wait("backpack slots on screen", lambda s: s["screen"] != 0x01 and s["slots"])
+        time.sleep(2)  # the menu opens animated: a hover right away misses the slot
+        s = addon.state()
     slot = next((x for x in s["slots"] if x["item"] and not x["mark"]), None)
     assert slot, "no unlocked backpack slot with an item on screen"
     print(f"slot {slot['slot']:#x} at position {slot['position']}")

@@ -22,6 +22,9 @@ static CLIENTS: Mutex<Vec<(u64, u32)>> = Mutex::new(Vec::new());
 /// Player entity -> the name its addon reported (the Steam name).
 static NAMES: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
 
+/// Addon session -> the name it sent at the welcome, before the session has a player.
+static CLIENT_NAMES: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
+
 /// An addon reported its backpack pages (and its player's name): find the player whose
 /// inventory has them.
 pub fn identify(client: u64, pages: &[u32], name: Option<String>) -> Option<u32> {
@@ -39,17 +42,40 @@ pub fn identify(client: u64, pages: &[u32], name: Option<String>) -> Option<u32>
     let mut clients = CLIENTS.lock().unwrap();
     clients.retain(|&(c, p)| c != client && p != player);
     clients.push((client, player));
+    drop(clients);
+    let name = name.or_else(|| client_name(client));
     log!("world: client {client:016x} is player {player}{}", name.as_deref().map(|n| format!(" ({n})")).unwrap_or_default());
     if let Some(name) = name {
-        let mut names = NAMES.lock().unwrap();
-        names.retain(|(p, _)| *p != player);
-        names.push((player, name));
+        set_player_name(player, name);
     }
     Some(player)
 }
 
+/// The addon sent its player's name at the welcome (newer addons): kept for the session,
+/// given to the player once the session has one.
+pub fn name_client(client: u64, name: String) {
+    let mut names = CLIENT_NAMES.lock().unwrap();
+    names.retain(|(c, _)| *c != client);
+    names.push((client, name.clone()));
+    drop(names);
+    if let Some(player) = player_of(client) {
+        set_player_name(player, name);
+    }
+}
+
+fn client_name(client: u64) -> Option<String> {
+    CLIENT_NAMES.lock().unwrap().iter().find(|(c, _)| *c == client).map(|(_, n)| n.clone())
+}
+
+fn set_player_name(player: u32, name: String) {
+    let mut names = NAMES.lock().unwrap();
+    names.retain(|(p, _)| *p != player);
+    names.push((player, name));
+}
+
 pub fn forget_client(client: u64) {
     CLIENTS.lock().unwrap().retain(|&(c, _)| c != client);
+    CLIENT_NAMES.lock().unwrap().retain(|(c, _)| *c != client);
 }
 
 /// Addons without a player yet, before they opened a chest: when exactly one addon and
@@ -63,7 +89,11 @@ pub fn match_unidentified(clients: &[u64]) -> Vec<(u64, u32)> {
     let free: Vec<u32> = players.into_iter().filter(|p| !claimed.contains(p)).collect();
     let [player] = free[..] else { return Vec::new() };
     CLIENTS.lock().unwrap().push((client, player));
-    log!("world: client {client:016x} is player {player} (the only unmatched one)");
+    let name = client_name(client);
+    log!("world: client {client:016x} is player {player} (the only unmatched one){}", name.as_deref().map(|n| format!(" ({n})")).unwrap_or_default());
+    if let Some(name) = name {
+        set_player_name(player, name);
+    }
     vec![(client, player)]
 }
 
