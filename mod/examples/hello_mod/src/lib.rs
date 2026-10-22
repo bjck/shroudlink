@@ -1,6 +1,6 @@
 //! Example shroudlink mod DLL: a menu entry that opens a window with a counter, a "Wave"
 //! button in the chest screen's backpack panel that shows a HUD message, and game events:
-//! deaths and pickups are counted, level-ups and deaths announced to everyone.
+//! deaths and pickups are counted (shown in its window), level-ups announced to everyone.
 //! Build it, drop `hello_mod.dll` into `shroudlink_mods/` next to the server.
 
 use std::collections::HashMap;
@@ -58,9 +58,10 @@ impl Mod for Hello {
 
     fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
         let text = match event.known() {
-            Some(Known::EntityDied { entity }) => {
+            // every creature's death would flood the HUD: only counted
+            Some(Known::EntityDied { .. }) => {
                 self.deaths += 1;
-                format!("Entity {entity} died ({} so far)", self.deaths)
+                return;
             }
             Some(Known::LevelUp { player, level }) => format!("Player {player} reached level {level}!"),
             Some(Known::Pickup { .. }) => {
