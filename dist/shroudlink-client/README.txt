@@ -23,6 +23,9 @@ WHAT YOU GET
     Damage meter - damage dealt, damage taken and healing for everyone, for
               the last fight and the whole session, and what killed you.
               Other players see your Steam name there.
+              During and after a fight a small panel in the bottom right shows
+              everyone's damage as bars. Open any menu (e.g. B) to drag it
+              somewhere else; switch it off on the Damage meter page.
 
 If two players join at the very same moment, the locks of one of them may only
 show after opening a chest once.
