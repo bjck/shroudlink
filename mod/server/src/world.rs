@@ -52,6 +52,37 @@ pub fn forget_client(client: u64) {
     CLIENTS.lock().unwrap().retain(|&(c, _)| c != client);
 }
 
+/// Addons without a player yet, before they opened a chest: when exactly one addon and
+/// exactly one player are unmatched, they belong together (one player, or players joining
+/// one after another). Returns the matches made.
+pub fn match_unidentified(clients: &[u64]) -> Vec<(u64, u32)> {
+    let unmatched: Vec<u64> = clients.iter().copied().filter(|&c| player_of(c).is_none()).collect();
+    let [client] = unmatched[..] else { return Vec::new() };
+    let players = players();
+    let claimed: Vec<u32> = CLIENTS.lock().unwrap().iter().map(|&(_, p)| p).collect();
+    let free: Vec<u32> = players.into_iter().filter(|p| !claimed.contains(p)).collect();
+    let [player] = free[..] else { return Vec::new() };
+    CLIENTS.lock().unwrap().push((client, player));
+    log!("world: client {client:016x} is player {player} (the only unmatched one)");
+    vec![(client, player)]
+}
+
+/// A player's backpack pages in the order the chest screen's backpack panel draws them:
+/// the inventory's pages, with the two actionbar pages (`SlotSelection.actionbarEntityIds`)
+/// moved to the end, as the panel draws the actionbar below the backpack.
+pub fn layout_of(player: u32) -> Option<Vec<u32>> {
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        let setup = game.inventory_setup(ctx, player)?;
+        let mut pages: Vec<u32> = game.pages(ctx, setup).pages().iter().map(|p| p.entity).filter(|&e| e != 0).collect();
+        let actionbar: Vec<u32> = game.player_reserved(ctx, player).pages.into_iter().filter(|p| *p != 0 && pages.contains(p)).collect();
+        pages.retain(|p| !actionbar.contains(p));
+        pages.extend(actionbar);
+        (!pages.is_empty()).then_some(pages)
+    })
+    .flatten()
+}
+
 /// The player entity of an addon session, once it has identified itself.
 pub fn player_of(client: u64) -> Option<u32> {
     CLIENTS.lock().unwrap().iter().find(|&&(c, _)| c == client).map(|&(_, p)| p)

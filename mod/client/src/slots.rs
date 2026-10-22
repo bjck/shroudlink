@@ -116,6 +116,18 @@ pub fn panel_done() {
     }
 }
 
+/// The core built the layout from the player's inventory: used until the chest screen's
+/// backpack panel draws one, so marks and slot keys work in the inventory view right away.
+/// The panel still reports its own (it also identifies the player).
+pub fn server_layout(pages: Vec<u32>) {
+    with(|s| {
+        if s.sent_layout.is_none() && !pages.is_empty() {
+            log!("slots: backpack layout from the server, {} page(s)", pages.len());
+            s.order = pages;
+        }
+    });
+}
+
 /// Mods that use slot keys or marks.
 fn owners(s: &State) -> Vec<String> {
     let mut owners: Vec<String> = s.keys.keys().chain(s.marks.keys()).cloned().collect();

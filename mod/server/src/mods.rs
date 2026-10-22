@@ -94,12 +94,78 @@ pub(crate) fn tick(host: &mut Host) {
 }
 
 pub(crate) fn tick_now(host: &mut Host) {
+    send_layouts(host);
     with_mods(|mods| mods.iter_mut().for_each(|m| m.on_tick(host)));
+}
+
+/// Backpack layouts per addon: the one the server built and sent, and whether the addon
+/// sent its own (from the chest screen), which then wins.
+#[derive(Default)]
+struct Layout {
+    sent: Option<Vec<u32>>,
+    from_addon: bool,
+}
+
+static LAYOUTS: Mutex<Vec<(ClientId, Layout)>> = Mutex::new(Vec::new());
+
+fn with_layout<R>(client: ClientId, f: impl FnOnce(&mut Layout) -> R) -> R {
+    let mut layouts = LAYOUTS.lock().unwrap_or_else(|e| e.into_inner());
+    let i = layouts.iter().position(|(c, _)| *c == client).unwrap_or_else(|| {
+        layouts.push((client, Layout::default()));
+        layouts.len() - 1
+    });
+    f(&mut layouts[i].1)
+}
+
+/// The addon learns the backpack layout only when the chest screen draws it; until then
+/// the server builds it from the player's inventory, so slot positions (chestsort's locks)
+/// work from the start of a session.
+fn send_layouts(host: &mut Host) {
+    let clients = host.clients();
+    crate::world::match_unidentified(&clients.iter().map(|c| c.0).collect::<Vec<_>>());
+    for client in clients {
+        if with_layout(client, |l| l.from_addon) {
+            continue;
+        }
+        let Some(pages) = crate::world::player_of(client.0).and_then(crate::world::layout_of) else { continue };
+        if with_layout(client, |l| l.sent.as_ref() == Some(&pages)) {
+            continue;
+        }
+        log!("shroudlink: client {:016x} backpack layout from the server: {pages:?}", client.0);
+        with_layout(client, |l| l.sent = Some(pages.clone()));
+        // the addon draws marks and takes slot keys in the inventory view with it
+        host.send(client, &json!({ "mod": "shroudlink", "op": "layout", "pages": pages }));
+        with_mods(|mods| {
+            for m in mods.iter_mut() {
+                let message = shroudlink::ui::FromClient::Layout { pages: pages.clone() }.to_message(m.id());
+                m.on_message(host, client, &message);
+            }
+        });
+    }
+}
+
+/// The addon sent its own layout: compare it with the server's (the action bar order is
+/// an assumption checked here) and stop sending the server's.
+fn addon_layout(client: ClientId, message: &Value) {
+    let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
+    let (first, server) = with_layout(client, |l| (!std::mem::replace(&mut l.from_addon, true), l.sent.clone()));
+    // the addon sends the same layout to every mod that uses slots
+    if !first {
+        return;
+    }
+    let server = server.or_else(|| crate::world::player_of(client.0).and_then(crate::world::layout_of));
+    match server {
+        Some(server) if server == pages => log!("shroudlink: client {:016x} backpack layout matches the server's", client.0),
+        Some(server) => log!("shroudlink: client {:016x} backpack layout {pages:?} differs from the server's {server:?}", client.0),
+        None => {}
+    }
 }
 
 /// Swaps in a new build of a mod (hot reload) and welcomes the connected clients again.
 pub(crate) fn replace(host: &mut Host, mut m: Box<dyn ServerMod>) {
     let clients = host.clients();
+    // the new build has not seen the server's layouts yet
+    LAYOUTS.lock().unwrap_or_else(|e| e.into_inner()).iter_mut().for_each(|(_, l)| l.sent = None);
     with_mods(|mods| {
         for &client in &clients {
             m.on_join(host, client);
@@ -156,6 +222,8 @@ pub(crate) fn ids() -> Vec<String> {
 }
 
 pub(crate) fn join(host: &mut Host, client: ClientId) {
+    // a new or reloaded addon knows no layout until its chest screen draws one
+    LAYOUTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(c, _)| *c != client);
     with_mods(|mods| {
         let list: Vec<Value> = mods.iter().map(|m| m.describe()).collect();
         host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id(), "features": crate::hooks::working() }));
@@ -167,6 +235,7 @@ pub(crate) fn join(host: &mut Host, client: ClientId) {
 
 pub(crate) fn leave(host: &mut Host, client: ClientId) {
     crate::world::forget_client(client.0);
+    LAYOUTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(c, _)| *c != client);
     with_mods(|mods| mods.iter_mut().for_each(|m| m.on_leave(host, client)));
 }
 
@@ -254,6 +323,9 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             _ => {}
         }
         return;
+    }
+    if message.get("op").and_then(Value::as_str) == Some("layout") {
+        addon_layout(client, message);
     }
     with_mods(|mods| match mods.iter_mut().find(|m| m.id() == target) {
         Some(m) => m.on_message(host, client, message),

@@ -164,6 +164,10 @@ fn dispatch(message: &Value) {
                 crate::slots::on_welcome(message.get("server").and_then(Value::as_str).unwrap_or("server"), &mods);
             }
             Some("pong") => log!("shroudlink: pong {}", message.get("echo").unwrap_or(&Value::Null)),
+            Some("layout") => {
+                let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
+                crate::slots::server_layout(pages);
+            }
             _ => {}
         }
     }
