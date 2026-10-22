@@ -7,14 +7,13 @@ Server side (everyone, no addon needed):
 - Action bar and equipped items are never put into chests.
 - Chests have 2x the slots (max 128), and items that stack hold 10x as many.
 
-With the client addon (shroudlink-client-next.zip) players also get:
-- item search in chests, slot locks (L)
-- MODS tab: Chest categories, Travel (to your map waypoint, also from the shroud),
-  Storage (all chests within 40 m as one box)
+With the client addon (shroudlink-client.zip) players also get:
+- item search in chests, slot locks (L), working right after joining
+- MODS tab: Chest categories, Storage (all chests within 40 m as one box)
 
 Files on the server (next to enshrouded_server.exe):
   steam_api64.dll        the shroudlink core (Steam's original renamed to steam_api64_o.dll)
-  shroudlink_mods\*.dll  the mods (chestsort, travel, storage); remove one to switch it off
+  shroudlink_mods\*.dll  the mods (chestsort, storage); remove one to switch it off
   chestsort_categories.json   categories; edits apply within seconds
   shroudlink.log         what the core and mods did
 

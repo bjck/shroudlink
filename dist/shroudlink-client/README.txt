@@ -14,10 +14,15 @@ WHAT YOU GET
   inventory). Locked slots get a gold rim and are never put into chests - not
   by R, not by holding R, not by a Quick Stack Station. Press L again to unlock.
   The lock belongs to the slot, not the item: move the item and the lock stays.
-  After joining, open any chest once so the addon learns your backpack layout.
-  Equipped items are never deposited anyway.
-- MODS tab in the menu (next to SKILLS, only on our server): shows the chest
-  categories and lets you search which chest an item belongs in.
+  Locks are kept per server and work right after joining.
+  Your action bar and equipped items are never put into chests either.
+- MODS tab in the menu (next to SKILLS, only on our server):
+    Chest categories - which chest name takes which items, item search
+    Storage - everything in the chests within 40 m as one box; click an item
+              to take it from all of them
+
+If two players join at the very same moment, the locks of one of them may only
+show after opening a chest once.
 
 INSTALL (1 minute)
 1. In Steam: right-click Enshrouded > Manage > Browse local files.
@@ -29,6 +34,7 @@ Delete dinput8.dll from the game folder.
 
 GOOD TO KNOW
 - On other servers the addon stays completely silent.
+- Works with the older server version too, and the older addon works with this server.
 - After a game update the addon switches itself off if the game changed too much;
   the game keeps working normally. A new version will be needed then.
 - If something seems off, the file shroudlink_client.log in the game folder shows

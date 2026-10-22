@@ -26,7 +26,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "chestsort"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "chestsort-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "iced-x86",
  "windows-sys 0.61.2",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "hello_mod"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "shroudlink-sdk",
 ]
@@ -81,7 +81,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "lantern"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "shroudlink-sdk",
 ]
@@ -125,7 +125,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "meter"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "shroudlink-sdk",
 ]
@@ -243,7 +243,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shroudlink"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "shroudlink-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chestsort-common",
  "iced-x86",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "shroudlink-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "shroudlink",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "shroudlink-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chestsort-common",
  "retour",
@@ -291,7 +291,7 @@ checksum = "7a3d689654af89bdfeba29a914ab6ac0236d382eb3b764f7454dde052f2821f8"
 
 [[package]]
 name = "storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "shroudlink-sdk",
 ]
@@ -309,7 +309,7 @@ dependencies = [
 
 [[package]]
 name = "travel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "shroudlink-sdk",
 ]
