@@ -95,11 +95,30 @@ fn stations_for(table: &Table, base: &dyn Base, recipe: &Recipe, assistant: u32,
     }))
 }
 
+/// Points the order's borrowed stations at the stations standing where they stood (after
+/// a restart the entity ids are new).
+fn rebind(base: &dyn Base, order: &mut Order, assistant: u32) {
+    if order.borrowed.is_empty() {
+        return;
+    }
+    let stations = base.stations_near(assistant, RADIUS);
+    let at = |entity: u32, pos: [f32; 3]| base.position(entity).is_some_and(|p| (0..3).map(|i| (p[i] as f32 - pos[i]).powi(2)).sum::<f32>() < 1.0);
+    for b in order.borrowed.iter_mut().filter(|b| b.3 != [0.0; 3]) {
+        if stations.iter().any(|s| s.entity == b.0 && at(s.entity, b.3)) {
+            continue;
+        }
+        if let Some(s) = stations.iter().find(|s| at(s.entity, b.3)) {
+            log!("assistants: order {}: borrowed station {} is now {}", order.id, b.0, s.entity);
+            b.0 = s.entity;
+        }
+    }
+}
+
 /// Gives a station the order no longer needs back: the recipe it was taken over from, or none.
 fn give_back(base: &dyn Base, order: &mut Order, station: u32) {
     match order.borrowed.iter().position(|b| b.0 == station) {
         Some(i) => {
-            let (_, recipe, selections) = order.borrowed.remove(i);
+            let (_, recipe, selections, _) = order.borrowed.remove(i);
             let ok = base.set_recipe(station, recipe, &selections);
             log!("assistants: order {}: station {station} back to recipe {recipe}: {ok}", order.id);
         }
@@ -146,6 +165,7 @@ fn water(base: &dyn Base, recipe: &Recipe, station: u32, runs: u32, assistant: u
 /// results to storage. A station in the middle of a run keeps it unless `cancel`.
 pub fn release(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base, cancel: bool) {
     let Some(recipe) = table.recipe(order.recipe) else { return };
+    rebind(base, order, assistant);
     let chests = base.chests_near(assistant, RADIUS);
     let inputs = input_items(table, recipe);
     for s in base.stations_near(assistant, RADIUS).into_iter().filter(|s| s.workshop == recipe.workshop && (s.next == recipe.id || s.running == recipe.id)) {
@@ -167,6 +187,7 @@ pub fn release(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base
 /// the stations orders use this round, so two orders never share one.
 pub fn step(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base, claimed: &mut Vec<u32>) -> Status {
     let Some(recipe) = table.recipe(order.recipe) else { return Status::NoStation };
+    rebind(base, order, assistant);
     let stations = match stations_for(table, base, recipe, assistant, claimed) {
         Ok(stations) => stations,
         Err(status) => return status,
@@ -228,7 +249,8 @@ pub fn step(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base, c
             dry |= !water(base, recipe, s.entity, plan.runs.max(have), assistant, order.id);
             if s.next != recipe.id {
                 if s.next != 0 && !order.borrowed.iter().any(|b| b.0 == s.entity) {
-                    order.borrowed.push((s.entity, s.next, s.selections.clone()));
+                    let pos = base.position(s.entity).map_or([0.0; 3], |p| p.map(|v| v as f32));
+                    order.borrowed.push((s.entity, s.next, s.selections.clone(), pos));
                 }
                 let set = base.set_recipe(s.entity, recipe.id, &plan.selections);
                 log!("assistants: order {}: station {} (state {}) set to {} {:?}: {set}", order.id, s.entity, s.state, recipe.name, plan.selections);
@@ -607,10 +629,32 @@ mod tests {
         let mut o = order(5);
         step(&t, &mut o, ASSISTANT, &base, &mut Vec::new());
         assert_eq!(base.stations.borrow()[0].next, 1, "taken over");
-        assert_eq!(o.borrowed, vec![(STATION, 2, vec![(77, 1)])]);
+        assert_eq!(o.borrowed, vec![(STATION, 2, vec![(77, 1)], [0.0; 3])]);
         release(&t, &mut o, ASSISTANT, &base, true);
         assert_eq!(base.stations.borrow()[0].next, 2, "the player's recipe is back");
         assert!(o.borrowed.is_empty());
+    }
+
+    #[test]
+    fn a_borrowed_station_is_found_again_after_a_restart() {
+        let t = table();
+        let mut base = FakeBase::new(vec![(ASSISTANT, 7)]);
+        base.station(STATION, KITCHEN);
+        base.positions.insert(STATION, [5.0, 0.0, 5.0]);
+        base.stations.borrow_mut()[0].next = 2;
+        base.stations.borrow_mut()[0].state = state::MISSING_MATERIALS;
+        base.chest(CHEST, 48, &[(MEAT, 10), (VEG_A, 10)]);
+        let mut o = order(5);
+        step(&t, &mut o, ASSISTANT, &base, &mut Vec::new());
+        // a restart: the same station under a new entity id
+        const NEW: u32 = 99;
+        base.stations.borrow_mut()[0].entity = NEW;
+        let slots = base.inventories.borrow_mut().remove(&STATION).unwrap();
+        base.inventories.borrow_mut().insert(NEW, slots);
+        base.positions.insert(NEW, [5.2, 0.0, 5.0]);
+        base.positions.remove(&STATION);
+        release(&t, &mut o, ASSISTANT, &base, true);
+        assert_eq!(base.stations.borrow()[0].next, 2, "the player's recipe is back on the same station");
     }
 
     #[test]

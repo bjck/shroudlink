@@ -170,6 +170,18 @@ From the reflection data (`server/.cache/types.json`) and the live component byt
   his forge. The state names in the binary are only the reflection table's; the AI code
   was not located.
 
+## Playing a sequence on an NPC (fishing animation, not done)
+
+- `ActorInput` (+0x8 `triggerContext`, +0x178 `triggerCallCounter`) stays all zeros on
+  NPCs while they talk or interact: the NPC AI does not start its sequences through it.
+- `NetworkActor` +0x0 `sequenceRuntimeId` (sequence resource id u64, trigger time u64,
+  actor entity id u32, call index) holds the running sequence that clients play, e.g.
+  `0x1599d5a4fb2` while the Blacksmith talks; empty while walking or standing.
+- A fishing animation would need the player's fishing sequence id (recorded while a player
+  fishes) written there with a fresh trigger time, a client that plays a player sequence on
+  an NPC's animation graph, and a server that does not overwrite it the next frame. Not
+  tried.
+
 ## Open
 
 - Writing `FactoryStation` from outside the system skips the game's change notification

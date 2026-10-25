@@ -43,8 +43,8 @@ loaded then):
    stopped; never paused, which may be mid-run): its recipe and category options are kept
    with the order and put back when the order no longer needs the station. A station that
    runs something else is left alone ("the Blast Furnace is making Iron Bar"), and two
-   orders never share one. The borrowed record is keyed by entity id, which changes with a
-   server restart: a restart mid-order leaves that station without a recipe.
+   orders never share one. The borrowed record keeps where the station stands, so after a
+   restart (new entity ids) the order finds it again.
 2. The results in those stations go into the chests within 40 m (chests that already hold
    the item first); results of the ordered item count towards the order.
 3. Done when enough is in the chests: the stations get their recipe cleared (or the
@@ -166,6 +166,6 @@ Not verified: whether a stopped run refunds its inputs on cancel.
 - Embedded UI: a section in the survivor's own crafting screen (needs a client building
   block for the crafting panel).
 - Working at the very station that makes the order (the game picks one of theirs), and a
-  fishing animation for the fisher.
+  fishing animation for the fisher (findings in `docs/research/assistants.md`).
 - Keeping seedlings stocked (Seedbed orders), and the crops that end in scatter loot
   (beans and ten more), which the gardener cannot harvest yet.

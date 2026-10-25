@@ -67,9 +67,10 @@ pub struct Order {
     pub status: Status,
     /// the order this one makes an ingredient for
     pub parent: Option<u32>,
-    /// idle stations it took over from someone else's recipe: (station, recipe, options),
-    /// given back when it no longer needs them
-    pub borrowed: Vec<(u32, u32, Vec<(u32, u8)>)>,
+    /// idle stations it took over from someone else's recipe: (station, recipe, options,
+    /// where the station stands), given back when it no longer needs them; entity ids
+    /// change with a restart, the position finds the station again
+    pub borrowed: Vec<(u32, u32, Vec<(u32, u8)>, [f32; 3])>,
 }
 
 impl Order {
@@ -91,7 +92,10 @@ impl Order {
             by: v["by"].as_str().unwrap_or("").into(),
             status: if v["done"].as_bool() == Some(true) { Status::Done } else { Status::Away },
             parent: v["parent"].as_u64().map(|p| p as u32),
-            borrowed: serde_json::from_value(v["borrowed"].clone()).unwrap_or_default(),
+            borrowed: serde_json::from_value(v["borrowed"].clone())
+                // written before positions were kept: no position (found by entity id only)
+                .or_else(|_| serde_json::from_value::<Vec<(u32, u32, Vec<(u32, u8)>)>>(v["borrowed"].clone()).map(|old| old.into_iter().map(|(e, r, s)| (e, r, s, [0.0; 3])).collect()))
+                .unwrap_or_default(),
         })
     }
 }
@@ -231,6 +235,12 @@ fn point(v: &Value) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_stations_saved_without_a_position_still_load() {
+        let v = json!({ "id": 4, "npc": 9, "product": 1, "recipe": 2, "amount": 5, "borrowed": [[1439, 3241707533u32, [[858856297u32, 0]]]] });
+        assert_eq!(Order::from_json(&v).unwrap().borrowed, vec![(1439, 3241707533, vec![(858856297, 0)], [0.0; 3])]);
+    }
 
     #[test]
     fn orders_survive_a_restart() {
