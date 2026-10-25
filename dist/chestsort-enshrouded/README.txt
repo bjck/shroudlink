@@ -7,14 +7,18 @@ Server side (everyone, no addon needed):
 - Action bar and equipped items are never put into chests.
 - Chests have 2x the slots (max 128), and items that stack hold 10x as many.
 
-With the client addon (shroudlink-client.zip) players also get:
+With the client addon (shroudlink-client.zip, version 0.6 or newer) players also get:
 - item search in chests, slot locks (L), working right after joining
-- MODS tab: Chest categories, Storage (all chests within 40 m as one box),
-  Damage meter (damage, damage taken and healing per player, what killed me)
+- MODS tab: Assistants (survivors run the base's stations on order, the Farmer
+  harvests, replants and feeds the animals, the Fisher fishes), Chest categories,
+  Storage (all chests within 40 m as one box), Damage meter (damage, damage taken
+  and healing per player, what killed me)
+Players with an older addon are told to update it.
 
 Files on the server (next to enshrouded_server.exe):
   steam_api64.dll        the shroudlink core (Steam's original renamed to steam_api64_o.dll)
-  shroudlink_mods\*.dll  the mods (chestsort, storage, meter); remove one to switch it off
+  shroudlink_mods\*.dll  the mods (chestsort, storage, meter, assistants); remove one to switch it off
+  shroudlink_assistants.json   the assistants' orders and jobs (kept across restarts)
   chestsort_categories.json   categories; edits apply within seconds
   shroudlink.log         what the core and mods did
 
