@@ -45,10 +45,10 @@ pub fn sub_orders(table: &Table, order: &Order, missing: &[(u32, u32)], depth: u
         let mut makers: Vec<(&crate::recipes::Recipe, u32)> = table
             .recipes
             .iter()
-            .filter(|r| r.makes(item) > 0 && here.stations.contains(&r.workshop))
+            .filter(|r| r.makes(item) > 0 && (r.instant() || here.stations.contains(&r.workshop)))
             // a maker that uses what the chain is making would go round in a circle
             .filter(|r| !r.inputs.iter().any(|i| matches!(*i, Input::Item { item: x, .. } if x == order.product || ancestors.contains(&x))))
-            .filter_map(|r| Some((r, table.station(r.workshop)?.unlocked_by)))
+            .filter_map(|r| Some((r, table.crafter(r.workshop)?)))
             .filter(|(_, who)| here.people.contains(who))
             .collect();
         makers.sort_by_key(|(r, who)| (*who != order.npc, r.inputs.len()));

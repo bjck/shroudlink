@@ -2,6 +2,7 @@
 //! `research/scripts/recipes.py` from the game's `RecipeRegistryResource`,
 //! `WorkshopRegistryResource` and `NpcCollection`): station recipes, which station belongs
 //! to which workshop, and which survivor workshop (and so which assistant) unlocks it.
+//! Instant recipes (0 seconds) belong to a survivor's own workshop: crafted at once.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -56,6 +57,11 @@ impl Recipe {
     /// How many of `item` one run makes.
     pub fn makes(&self, item: u32) -> u32 {
         self.outputs.iter().filter(|o| o.0 == item).map(|o| o.1).sum()
+    }
+
+    /// Crafted at once in a survivor's workshop, no station.
+    pub fn instant(&self) -> bool {
+        self.seconds == 0.0
     }
 }
 
@@ -118,15 +124,36 @@ impl Table {
         self.stations.iter().filter(move |s| s.unlocked_by == survivor_workshop)
     }
 
-    /// Recipes that make `item`, on stations `survivor_workshop` unlocks.
+    /// The workshops whose recipes a survivor runs: the stations it unlocks and its own.
+    fn workshops_of(&self, survivor_workshop: u32) -> Vec<u32> {
+        let mut out: Vec<u32> = self.stations_of(survivor_workshop).map(|s| s.workshop).collect();
+        out.push(survivor_workshop);
+        out
+    }
+
+    /// Whether a survivor has anything to make: stations or instant recipes.
+    pub fn crafts(&self, survivor_workshop: u32) -> bool {
+        self.stations_of(survivor_workshop).next().is_some() || self.recipes.iter().any(|r| r.workshop == survivor_workshop)
+    }
+
+    /// The survivor workshop that runs a workshop's recipes: the one that unlocks the
+    /// station, or the survivor's own for instant recipes.
+    pub fn crafter(&self, workshop: u32) -> Option<u32> {
+        match self.station(workshop) {
+            Some(s) => Some(s.unlocked_by),
+            None => self.npcs.iter().any(|n| n.workshop == workshop).then_some(workshop),
+        }
+    }
+
+    /// Recipes that make `item`, on stations `survivor_workshop` unlocks or its own.
     pub fn recipes_for(&self, survivor_workshop: u32, item: u32) -> Vec<&Recipe> {
-        let stations: Vec<u32> = self.stations_of(survivor_workshop).map(|s| s.workshop).collect();
+        let stations = self.workshops_of(survivor_workshop);
         self.recipes.iter().filter(|r| stations.contains(&r.workshop) && r.makes(item) > 0).collect()
     }
 
     /// Everything the people of a survivor workshop can produce: (item, recipes).
     pub fn products_of(&self, survivor_workshop: u32) -> Vec<(u32, Vec<&Recipe>)> {
-        let stations: Vec<u32> = self.stations_of(survivor_workshop).map(|s| s.workshop).collect();
+        let stations = self.workshops_of(survivor_workshop);
         let mut out: Vec<(u32, Vec<&Recipe>)> = Vec::new();
         for r in self.recipes.iter().filter(|r| stations.contains(&r.workshop)) {
             if let Some(&(item, _)) = r.outputs.first() {
@@ -177,6 +204,17 @@ mod tests {
         assert_eq!(stew.inputs.len(), 4);
         assert!(t.products_of(farmer.workshop).iter().any(|(item, _)| *item == 2634459448));
         assert_eq!(t.recipes_for(farmer.workshop, 2634459448).len(), 1);
+    }
+
+    #[test]
+    fn the_alchemist_makes_potions_at_once() {
+        let t = table();
+        let alchemist = t.npcs.iter().find(|n| n.name == "NPC_Workshop_Alchemist01").unwrap();
+        let potion = t.recipes.iter().find(|r| r.name == "Consumable_Potion_T1_Health").unwrap();
+        assert!(potion.instant());
+        assert_eq!((potion.workshop, t.crafter(potion.workshop)), (alchemist.workshop, Some(alchemist.workshop)));
+        assert!(t.products_of(alchemist.workshop).iter().any(|(item, _)| *item == potion.outputs[0].0));
+        assert!(t.crafts(alchemist.workshop));
     }
 
     #[test]

@@ -103,7 +103,7 @@ fn npc_name(workshop: u32) -> String {
 /// Survivors near a player who run stations or have a job: (entity, npc id).
 fn survivors_near(base: &dyn Base, player: u32) -> Vec<(u32, u32)> {
     let t = table();
-    let works = |w: u32| t.stations_of(w).next().is_some() || !jobs::kinds_for(w).is_empty();
+    let works = |w: u32| t.crafts(w) || !jobs::kinds_for(w).is_empty();
     let mut found: Vec<(u32, u32)> = Vec::new();
     for (entity, w) in base.npcs_near(player, NEAR) {
         // a survivor and their assistant are one entry
@@ -159,6 +159,8 @@ fn stations_here(base: &dyn Base, npc_entity: u32, workshop: u32) -> Vec<u32> {
     let t = table();
     let mine: Vec<u32> = t.stations_of(workshop).map(|s| s.workshop).collect();
     let mut found: Vec<u32> = base.stations_near(npc_entity, work::RADIUS).into_iter().map(|s| s.workshop).filter(|w| mine.contains(w)).collect();
+    // their own workshop, for the recipes they craft at once
+    found.push(workshop);
     found.sort();
     found.dedup();
     found
@@ -272,6 +274,7 @@ fn orders_tab(orders: &Orders, base: &WorldBase, entity: u32, npc_id: u32, view:
     let names: Vec<String> = here.iter().filter_map(|w| t.station(*w)).map(|s| names::pretty(&s.name)).collect();
     content.push(Node::Text {
         text: match names.len() {
+            0 if t.products_of(npc_id).iter().any(|(_, rs)| rs.iter().any(|r| r.instant())) => "They craft at once from the chests; none of their stations stands within 40 m.".into(),
             0 => "None of their stations stands within 40 m.".into(),
             1..=3 => format!("Stations: {}", names.join(", ")),
             n => format!("{n} stations: {} ...", names[..3].join(", ")),
@@ -295,6 +298,7 @@ fn orders_tab(orders: &Orders, base: &WorldBase, entity: u32, npc_id: u32, view:
         }
         content.push(Node::Text {
             text: match view.product.and_then(|p| Some((p, recipe_for(base, entity, npc_id, p)?))) {
+                Some((p, r)) if r.instant() => format!("{}: {} per run, crafted at once", names::item(p), r.makes(p)),
                 Some((p, r)) => format!("{}: {} per run, {:.0} s a run", names::item(p), r.makes(p), r.seconds),
                 None => "Click what they should make.".into(),
             },
@@ -358,7 +362,7 @@ impl Assistants {
                 let t = table();
                 let kinds = jobs::kinds_for(npc_id);
                 let mut tabs: Vec<Tab> = Vec::new();
-                if t.stations_of(npc_id).next().is_some() {
+                if t.crafts(npc_id) {
                     tabs.push(Tab::Orders);
                 }
                 if !kinds.is_empty() {

@@ -187,6 +187,9 @@ pub fn release(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base
 /// the stations orders use this round, so two orders never share one.
 pub fn step(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base, claimed: &mut Vec<u32>) -> Status {
     let Some(recipe) = table.recipe(order.recipe) else { return Status::NoStation };
+    if recipe.instant() {
+        return craft(table, order, recipe, assistant, base);
+    }
     rebind(base, order, assistant);
     let stations = match stations_for(table, base, recipe, assistant, claimed) {
         Ok(stations) => stations,
@@ -276,6 +279,65 @@ pub fn step(table: &Table, order: &mut Order, assistant: u32, base: &dyn Base, c
         Status::Running
     } else {
         Status::Missing(needs)
+    }
+}
+
+/// An instant recipe, crafted in the survivor's workshop as a player crafts it there, a
+/// few runs per step: per run the ingredients leave the chests first, then the results are
+/// made into them, so a failure can cost one run's ingredients, never make results twice.
+fn craft(table: &Table, order: &mut Order, recipe: &Recipe, assistant: u32, base: &dyn Base) -> Status {
+    let chests = base.chests_near(assistant, RADIUS);
+    let mut storage = counts_of(base, &chests);
+    let runs = planner::runs_for(recipe, order.product, order.amount.saturating_sub(order.produced)).min(BATCH);
+    for _ in 0..runs {
+        let plan = planner::feed(table, recipe, 1, &Counts::new(), &storage);
+        if plan.runs == 0 {
+            return Status::Missing(plan.missing);
+        }
+        for &(item, count) in &plan.moves {
+            let mut left = count;
+            for &c in &chests {
+                for s in base.slots(c).into_iter().filter(|s| s.item == item && s.count != 0) {
+                    if left == 0 {
+                        break;
+                    }
+                    left -= base.remove(c, s.id, left.min(s.count));
+                }
+            }
+            if let Some(n) = storage.get_mut(&item) {
+                *n = n.saturating_sub(count - left);
+            }
+            if left > 0 {
+                log!("assistants: order {}: {left} of {count} x item {item} could not be taken", order.id);
+                return Status::Missing(vec![(item, left)]);
+            }
+        }
+        for &(item, count) in &recipe.outputs {
+            // chests already holding it first
+            let holds = |c: u32| base.slots(c).iter().any(|s| s.item == item && s.count != 0);
+            let (mut first, rest): (Vec<u32>, Vec<u32>) = chests.iter().partition(|&&c| holds(c));
+            first.extend(rest);
+            let mut made = 0;
+            for chest in first {
+                made += base.give(chest, item, count - made);
+                if made >= count {
+                    break;
+                }
+            }
+            if item == order.product {
+                order.produced += made;
+            }
+            if made < count {
+                log!("assistants: order {}: no room for {} of {count} x item {item}", order.id, count - made);
+                return Status::StorageFull;
+            }
+        }
+        log!("assistants: order {}: crafted {} ({}/{})", order.id, recipe.name, order.produced, order.amount);
+    }
+    if order.produced >= order.amount {
+        Status::Done
+    } else {
+        Status::Running
     }
 }
 
@@ -581,6 +643,21 @@ mod tests {
             base.advance(t);
         }
         status
+    }
+
+    #[test]
+    fn crafts_an_instant_recipe_from_the_chests() {
+        // a potion from 2 meat, 2 a run, crafted by the survivor (workshop 9) at once
+        let t = Table::parse("npc\t7\t9\t0\tAlchemist\nrecipe\t5\t9\t0\t0\t0\t0\titem:10:2\t40:2\tPotion\t0\n");
+        let base = FakeBase::new(vec![(ASSISTANT, 9)]);
+        base.chest(CHEST, 48, &[(MEAT, 7)]);
+        let mut o = Order { recipe: 5, product: 40, ..order(5) };
+        assert_eq!(step(&t, &mut o, ASSISTANT, &base, &mut Vec::new()), Status::Done);
+        // 3 runs make 6, the meat for a fourth stays
+        assert_eq!((o.produced, base.count(CHEST, 40), base.count(CHEST, MEAT)), (6, 6, 1));
+        let mut more = Order { recipe: 5, product: 40, ..order(4) };
+        assert_eq!(step(&t, &mut more, ASSISTANT, &base, &mut Vec::new()), Status::Missing(vec![(MEAT, 1)]));
+        assert_eq!(base.count(CHEST, MEAT), 1, "nothing taken for a run it cannot make");
     }
 
     #[test]

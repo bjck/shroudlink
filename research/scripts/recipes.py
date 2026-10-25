@@ -10,7 +10,10 @@ Rows of the output (tab separated, ids are the game's HashKey32 values):
   category  <category id> <item:scaling,...>
 inputs: item:<id>:<count> or cat:<category id>:<count>, comma separated; outputs: <id>:<count>.
 Water charges are taken per run from Wells in range or the station's own tank.
-Only timed recipes of stations (factory recipes) are written: those are the ones a station
+Instant recipes of the survivors' own workshops that make stackable things (potions, ammo,
+materials, food) are written too, with 0 seconds: the assistant crafts those at once from
+the chests, as a player does at the survivor.
+Only timed recipes of stations (factory recipes) are written besides: those are the ones a station
 runs on its own, which an assistant can operate.
 """
 import sys
@@ -49,6 +52,9 @@ def main():
     def timed(r):
         return int(r[3]) > 0 and int(r[2]) in workshops and int(r[2]) not in npc_workshops
 
+    def instant(r):
+        return int(r[3]) == 0 and int(r[2]) in npc_workshops and r[13].split("_")[0] in ("Consumable", "Ammo", "Material", "Food")
+
     stations = sorted({int(r[2]) for r in recipes if timed(r)})
     rows = []
     for npc, workshop, assistant, name in sorted(npcs):
@@ -57,11 +63,11 @@ def main():
         item = workshops[w]
         rows.append(f"station\t{w}\t{item}\t{made_at.get(item, 0)}\t{names.get(item, '?')}")
     for r in recipes:
-        if timed(r) and r[15]:
+        if (timed(r) or instant(r)) and r[15]:
             seconds = int(r[3]) / 1e9
             charges = r[16] if len(r) > 16 else "0"
             rows.append(f"recipe\t{r[1]}\t{r[2]}\t{seconds:g}\t{r[6]}\t{r[7]}\t{r[8]}\t{r[14]}\t{r[15]}\t{r[13]}\t{charges}")
-    used = {i.split(":")[1] for r in recipes if timed(r) for i in r[14].split(",") if i.startswith("cat:")}
+    used = {i.split(":")[1] for r in recipes if timed(r) or instant(r) for i in r[14].split(",") if i.startswith("cat:")}
     for cid, items in categories:
         if cid in used:
             rows.append(f"category\t{cid}\t{items}")
