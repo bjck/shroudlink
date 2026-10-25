@@ -78,6 +78,25 @@ pub struct Job {
     pub site: Option<[f32; 3]>,
     /// what this step brought in, for the players' notification: (item, count)
     pub news: Vec<(u32, u32)>,
+    /// the most crops of a kind replanted (or left without a seedling) in one round:
+    /// (seedling, count), about the size of that field; the seedling stock is kept above it
+    pub peaks: Vec<(u32, u32)>,
+}
+
+/// Seedlings kept in the chests beyond a field's size.
+pub const SEEDLING_RESERVE: u32 = 5;
+
+/// Seedlings to order so the chests hold a field's worth plus the reserve: (seedling,
+/// amount), from the peaks and the seedlings in stock.
+pub fn seedlings_short(peaks: &[(u32, u32)], stock: impl Fn(u32) -> u32) -> Vec<(u32, u32)> {
+    peaks
+        .iter()
+        .filter_map(|&(seedling, peak)| {
+            let want = peak + SEEDLING_RESERVE;
+            let have = stock(seedling);
+            (have < want).then(|| (seedling, want - have))
+        })
+        .collect()
 }
 
 impl Job {
@@ -91,7 +110,7 @@ impl Job {
 
 impl Job {
     pub fn new(npc: u32, kind: Kind) -> Job {
-        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new() }
+        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new(), peaks: Vec::new() }
     }
 }
 
@@ -102,6 +121,12 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
     let mut moved = 0;
     let mut stuck = false;
     let mut no_seedling = None;
+    // seedlings this round wanted, by crop kind
+    let mut round: Vec<(u32, u32)> = Vec::new();
+    let mut want = |seedling: u32| match round.iter_mut().find(|r| r.0 == seedling) {
+        Some(r) => r.1 += 1,
+        None => round.push((seedling, 1)),
+    };
     let mut harvested = Vec::new();
     let mut crops_harvested = Vec::new();
     for (plant, kind) in base.harvestables_near(gardener, RADIUS) {
@@ -128,11 +153,13 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
         }
         match replant(base, plant, &chests) {
             Ok(seedling) => {
+                want(seedling);
                 job.replanted += 1;
                 log!("assistants: crop {plant} harvested and replanted with item {seedling}");
             }
             Err(missing) => {
-                if missing.is_some() {
+                if let Some(seedling) = missing {
+                    want(seedling);
                     no_seedling = missing;
                 }
                 if base.finish_crop(plant) {
@@ -142,6 +169,12 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
         }
     }
     job.done += moved;
+    for (seedling, n) in round {
+        match job.peaks.iter_mut().find(|p| p.0 == seedling) {
+            Some(p) => p.1 = p.1.max(n),
+            None => job.peaks.push((seedling, n)),
+        }
+    }
     // where they work: a crop just harvested, else among the growing crops, else the last
     // place they harvested (fruit trees, animals)
     let site = crate::walk::site_of(&crops_harvested).or_else(|| crate::walk::site_of(&base.growing_near(gardener, RADIUS))).or_else(|| crate::walk::site_of(&harvested));
@@ -272,6 +305,24 @@ mod tests {
         assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
         assert!(base.finished.borrow().is_empty(), "a replanted crop is not removed");
         assert_eq!((base.count(CHEST, SEEDLING), base.count(CHEST, 500), job.replanted), (1, 3, 1));
+    }
+
+    #[test]
+    fn a_round_remembers_the_field_size_and_the_stock_is_topped_up() {
+        let mut base = FakeBase::new(vec![]);
+        // two crops ripe, one seedling: one replanted, one left without
+        base.chest(CHEST, 48, &[(SEEDLING, 1)]);
+        base.chest(CROP, 8, &[(500, 3)]);
+        base.chest(CROP + 1, 8, &[(500, 3)]);
+        base.harvest = vec![(CROP, Harvest::Crop), (CROP + 1, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        base.seedlings.insert(CROP + 1, SEEDLING);
+        let mut job = Job::new(7, Kind::Harvest);
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!(job.peaks, vec![(SEEDLING, 2)]);
+        // a smaller round keeps the peak
+        job.peaks.push((999, 1));
+        assert_eq!(seedlings_short(&job.peaks, |item| if item == SEEDLING { 3 } else { 10 }), vec![(SEEDLING, 2 + SEEDLING_RESERVE - 3)]);
     }
 
     #[test]

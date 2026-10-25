@@ -132,6 +132,7 @@ impl Orders {
                                     let mut job = Job::new(j["npc"].as_u64()? as u32, Kind::from_name(j["kind"].as_str()?)?);
                                     job.done = j["done"].as_u64().unwrap_or(0) as u32;
                                     job.replanted = j["replanted"].as_u64().unwrap_or(0) as u32;
+                                    job.peaks = serde_json::from_value(j["peaks"].clone()).unwrap_or_default();
                                     job.spot = point(&j["spot"]);
                                     Some(job)
                                 })
@@ -215,7 +216,7 @@ impl Orders {
             self.list.retain(|o| !drop.contains(&o.id));
         }
         let Some(path) = &self.path else { return };
-        let jobs: Vec<Value> = self.jobs.iter().map(|j| json!({ "npc": j.npc, "kind": j.kind.name(), "done": j.done, "replanted": j.replanted, "spot": j.spot })).collect();
+        let jobs: Vec<Value> = self.jobs.iter().map(|j| json!({ "npc": j.npc, "kind": j.kind.name(), "done": j.done, "replanted": j.replanted, "spot": j.spot, "peaks": j.peaks })).collect();
         let homes: Vec<Value> = self
             .homes
             .iter()

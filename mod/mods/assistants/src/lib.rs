@@ -485,6 +485,27 @@ impl Assistants {
                 }
             }
         }
+        // the gardener keeps the seedlings for the fields in stock: Seedbed orders
+        let mut seed_orders: Vec<(u32, u32, u32, u32)> = Vec::new();
+        for job in self.orders.jobs.iter().filter(|j| j.kind == Kind::Harvest && !j.peaks.is_empty()) {
+            let Some(&entity) = at.get(&job.npc) else { continue };
+            let chests = base.chests_near(entity, work::RADIUS);
+            let stock = |item: u32| chests.iter().flat_map(|&c| base.slots(c)).filter(|s| s.item == item).map(|s| s.count).sum::<u32>();
+            for (seedling, amount) in jobs::seedlings_short(&job.peaks, stock) {
+                let ordered = self.orders.list.iter().any(|o| !o.done() && o.product == seedling);
+                if let (false, Some(recipe)) = (ordered, recipe_for(&base, entity, job.npc, seedling)) {
+                    seed_orders.push((job.npc, seedling, recipe.id, amount));
+                }
+            }
+        }
+        for (npc, seedling, recipe, amount) in seed_orders {
+            let id = self.orders.add(npc, seedling, recipe, amount, "the gardener");
+            log!("assistants: order {id}: the gardener restocks {amount} {}", names::item(seedling));
+            if !muted.contains(&npc) {
+                finished.push(format!("{} sows {amount} {} for the fields.", npc_name(npc), names::item(seedling)));
+            }
+            changed = true;
+        }
         // survivors walk to their work, and home again when it is done
         let mut workshops: Vec<u32> = want.keys().copied().collect();
         workshops.extend(self.orders.homes.iter().map(|m| m.workshop));

@@ -113,7 +113,11 @@ notifications about their work (finished orders, sub-orders, harvests, catches).
   over with one matching seedling from the chests (`plants.tsv`): the plant root's level is
   set to 0, and the game's own growth and upgrade systems grow it again from the first stage,
   as they do while it grows. The seedling goes first and comes back if that fails; without a
-  seedling the crop is removed as in vanilla. No new plants are placed: only where one grew.
+  seedling the crop is removed as in vanilla. No new plants are placed: only where one grew. **Seedlings in stock**:
+  the gardener remembers the most crops of a kind replanted (or left without a seedling)
+  in one round, about the size of that field, and keeps that many plus 5 seedlings in the
+  chests: when there are fewer, the Farmer orders the difference at a Seedbed nearby (an
+  ordinary order, by "the gardener", one per seedling at a time).
 - **Fisher** (the Fisher): one catch a minute, at most 3 made up after a pause. Each catch
   takes one bait from the chests, draws a fish from the spawn table of a fishing spot
   within 60 m (`ecs::FishingSpot`) or the table players fish from anywhere, weighted by what
@@ -168,5 +172,5 @@ Not verified: whether a stopped run refunds its inputs on cancel.
   block for the crafting panel).
 - Working at the very station that makes the order (the game picks one of theirs), and a
   fishing animation for the fisher (findings in `docs/research/assistants.md`).
-- Keeping seedlings stocked (Seedbed orders), and the crops that end in scatter loot
-  (beans and ten more), which the gardener cannot harvest yet.
+- The crops that end in scatter loot (beans and ten more), which the gardener cannot
+  harvest yet.
