@@ -396,7 +396,7 @@ impl Base for WorldBase<'_> {
 
     fn finish_crop(&self, crop: u32) -> bool {
         let Some(mut d) = self.world.component(crop, "DestroyOnLoot") else { return false };
-        if d.len() <= destroy_on_loot::SHOULD_DESTROY || d[destroy_on_loot::IS_ACTIVE] == 0 || self.world.inventory(crop).iter().any(|s| s.count != 0) {
+        if d.len() <= destroy_on_loot::SHOULD_DESTROY || d[destroy_on_loot::IS_ACTIVE] == 0 || d[destroy_on_loot::SHOULD_DESTROY] != 0 || self.world.inventory(crop).iter().any(|s| s.count != 0) {
             return false;
         }
         d[destroy_on_loot::SHOULD_DESTROY] = 1;
@@ -475,6 +475,10 @@ impl Base for WorldBase<'_> {
         if current == 0 {
             return false;
         }
+        // the upgrade system swaps stages when the level changes, and leaves a loot stage
+        // not yet marked looted standing (seen on beans: the root at level 1 under a ripe
+        // stage): marked first, the swap takes it away
+        self.finish_crop(crop);
         l[at + index * 4..at + index * 4 + 4].copy_from_slice(&0u32.to_le_bytes());
         self.world.set_component(root, "Level", &l)
     }

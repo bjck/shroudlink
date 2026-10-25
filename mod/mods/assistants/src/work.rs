@@ -377,11 +377,13 @@ pub mod fake {
         pub looted: RefCell<Vec<u32>>,
         /// growing crop stages: (stage, seedling, false)
         pub young: Vec<(u32, u32, bool)>,
+        /// crops whose replanting fails
+        pub unplantable: Vec<u32>,
     }
 
     impl FakeBase {
         pub fn new(npcs: Vec<(u32, u32)>) -> FakeBase {
-            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default(), young: Vec::new() }
+            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default(), young: Vec::new(), unplantable: Vec::new() }
         }
         pub fn chest(&self, entity: u32, slots: usize, items: &[(u32, u32)]) {
             let mut inv = vec![(0, 0); slots];
@@ -579,6 +581,9 @@ pub mod fake {
             self.seedlings.get(&crop).copied()
         }
         fn replant(&self, crop: u32) -> bool {
+            if self.unplantable.contains(&crop) {
+                return false;
+            }
             self.replanted.borrow_mut().push(crop);
             true
         }

@@ -212,7 +212,8 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
                 job.replanted += 1;
                 log!("assistants: crop {plant} harvested and replanted with item {seedling}");
             }
-            Err(missing) => {
+            // no seedling, or a crop the table does not know: done, the soil stays empty
+            Err(missing) if missing.is_some() || base.crop_seedling(plant).is_none() => {
                 if let Some(seedling) = missing {
                     want(seedling);
                     no_seedling = missing;
@@ -221,6 +222,9 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
                     log!("assistants: crop {plant} harvested, not replanted");
                 }
             }
+            // the plant could not start over (or did already, and the game has not swapped
+            // the stage yet): left as it is, never marked for removal
+            Err(_) => {}
         }
     }
     job.done += moved;
@@ -553,6 +557,24 @@ mod tests {
         harvest(&base, GARDENER, &mut job);
         assert_eq!(base.count(CHEST, BEAN), 0, "no second harvest");
         assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
+    }
+
+    #[test]
+    fn a_crop_that_cannot_start_over_is_left_standing_and_keeps_its_seedling() {
+        // replanted already, the game has not swapped the stage yet (seen on beans)
+        const BEAN: u32 = 650;
+        let mut base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[(SEEDLING, 1)]);
+        base.chest(CROP, 8, &[]);
+        base.harvest = vec![(CROP, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        base.loot.insert(CROP, vec![(BEAN, 3)]);
+        base.looted.borrow_mut().push(CROP);
+        base.unplantable.push(CROP);
+        let mut job = Job::new(7, Kind::Harvest);
+        harvest(&base, GARDENER, &mut job);
+        assert!(base.finished.borrow().is_empty(), "never marked for removal");
+        assert_eq!(base.count(CHEST, SEEDLING), 1);
     }
 
     #[test]
