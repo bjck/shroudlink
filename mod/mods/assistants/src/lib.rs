@@ -212,7 +212,6 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
     let stock = stock_near(base, entity);
     // seedling -> (growing, ripe, picked and waiting)
     let mut kinds: Vec<(u32, u32, u32, u32)> = Vec::new();
-    let mut known_growing = 0;
     for (stage, seedling, ripe) in base.crops_near(entity, work::RADIUS) {
         let k = match kinds.iter().position(|k| k.0 == seedling) {
             Some(i) => &mut kinds[i],
@@ -222,10 +221,7 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
             }
         };
         match (ripe, ripe && base.crop_picked(stage)) {
-            (false, _) => {
-                k.1 += 1;
-                known_growing += 1;
-            }
+            (false, _) => k.1 += 1,
             (true, false) => k.2 += 1,
             (true, true) => k.3 += 1,
         }
@@ -266,11 +262,6 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
         })
         .collect();
     nodes.push(Node::List { id: "crops".into(), entries });
-    // plants whose kind the table cannot tell (stages several plants share, trees)
-    let others = base.growing_near(entity, work::RADIUS).len().saturating_sub(known_growing);
-    if others > 0 {
-        nodes.push(Node::Text { text: format!("{others} other plant(s) growing (trees, bushes, kinds that cannot be told apart while young).") });
-    }
     nodes
 }
 
