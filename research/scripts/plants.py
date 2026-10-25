@@ -66,9 +66,25 @@ def main():
     for row in rows:
         count[row.split("\t")[1]] += 1
     rows = [row for row in rows if count[row.split("\t")[1]] == 1]
+    # the growing stages of those crops, by their own inventory (when no other plant has it),
+    # so the gardener's window can tell what grows where:
+    #   stage <stage inventory guid> <ripe inventory guid of its crop>
+    ripe_of = {row.split("\t")[3]: row.split("\t")[1] for row in rows}
+    used = defaultdict(set)
+    for root, levels in stages.items():
+        for _, _, inventory in levels:
+            if inventory:
+                used[inventory].add(root)
+    for root, levels in sorted(stages.items(), key=lambda x: names[x[0]]):
+        if names[root] not in ripe_of:
+            continue
+        top = max(levels)[0]
+        for inventory in sorted({inv for lv, _, inv in levels if lv != top and inv and len(used[inv]) == 1}):
+            rows.append(f"stage\t{inventory}\t{ripe_of[names[root]]}")
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(rows) + "\n")
-    print(f"{len(rows)} crops, {sum(r.count(chr(9)) > 4 for r in rows)} with a harvest made on picking")
+    crops = [r for r in rows if r.startswith("crop")]
+    print(f"{len(crops)} crops, {sum(r.count(chr(9)) > 4 for r in crops)} with a harvest made on picking, {len(rows) - len(crops)} growing stages")
 
 
 if __name__ == "__main__":

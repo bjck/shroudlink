@@ -313,11 +313,13 @@ pub mod fake {
         /// scatter-loot crops: what picking them gives
         pub loot: HashMap<u32, Vec<(u32, u32)>>,
         pub looted: RefCell<Vec<u32>>,
+        /// growing crop stages: (stage, seedling, false)
+        pub young: Vec<(u32, u32, bool)>,
     }
 
     impl FakeBase {
         pub fn new(npcs: Vec<(u32, u32)>) -> FakeBase {
-            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default() }
+            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default(), young: Vec::new() }
         }
         pub fn chest(&self, entity: u32, slots: usize, items: &[(u32, u32)]) {
             let mut inv = vec![(0, 0); slots];
@@ -504,6 +506,9 @@ pub mod fake {
         fn mark_looted(&self, crop: u32) -> bool {
             self.looted.borrow_mut().push(crop);
             true
+        }
+        fn crops_near(&self, _: u32, _: f64) -> Vec<(u32, u32, bool)> {
+            self.harvest.iter().filter(|h| h.1 == Harvest::Crop).filter_map(|h| Some((h.0, *self.seedlings.get(&h.0)?, true))).chain(self.young.iter().copied()).collect()
         }
         fn crop_picked(&self, crop: u32) -> bool {
             self.looted.borrow().contains(&crop) && self.inventories.borrow().get(&crop).is_none_or(|i| i.iter().all(|s| s.1 == 0))

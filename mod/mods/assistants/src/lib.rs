@@ -210,45 +210,53 @@ fn stock_near(base: &dyn Base, entity: u32) -> HashMap<u32, u32> {
 fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
     let mut nodes = Vec::new();
     let stock = stock_near(base, entity);
-    // seedling -> (ripe, picked and waiting)
-    let mut kinds: Vec<(u32, u32, u32)> = Vec::new();
-    for (crop, kind) in base.harvestables_near(entity, work::RADIUS) {
-        if kind != base::Harvest::Crop {
-            continue;
-        }
-        let Some(seedling) = base.crop_seedling(crop) else { continue };
-        let waiting = base.crop_picked(crop) as u32;
-        match kinds.iter_mut().find(|k| k.0 == seedling) {
-            Some(k) => {
-                k.1 += 1 - waiting;
-                k.2 += waiting;
+    // seedling -> (growing, ripe, picked and waiting)
+    let mut kinds: Vec<(u32, u32, u32, u32)> = Vec::new();
+    let mut known_growing = 0;
+    for (stage, seedling, ripe) in base.crops_near(entity, work::RADIUS) {
+        let k = match kinds.iter().position(|k| k.0 == seedling) {
+            Some(i) => &mut kinds[i],
+            None => {
+                kinds.push((seedling, 0, 0, 0));
+                kinds.last_mut().unwrap()
             }
-            None => kinds.push((seedling, 1 - waiting, waiting)),
+        };
+        match (ripe, ripe && base.crop_picked(stage)) {
+            (false, _) => {
+                k.1 += 1;
+                known_growing += 1;
+            }
+            (true, false) => k.2 += 1,
+            (true, true) => k.3 += 1,
         }
     }
     for &(seedling, _) in job.map_or(&[][..], |j| &j.peaks[..]) {
         if !kinds.iter().any(|k| k.0 == seedling) {
-            kinds.push((seedling, 0, 0));
+            kinds.push((seedling, 0, 0, 0));
         }
     }
-    let growing = base.growing_near(entity, work::RADIUS).len();
-    nodes.push(Node::Text { text: format!("{growing} plant(s) growing around them. Ripe crops are picked when a seedling is there to replant them.") });
+    nodes.push(Node::Text { text: "What grows around them. Ripe crops are picked when a seedling is there to replant them.".into() });
     if kinds.is_empty() {
-        nodes.push(Node::Text { text: "No ripe crops around them right now.".into() });
+        nodes.push(Node::Text { text: "No crops around them right now.".into() });
         return nodes;
     }
     kinds.sort_by_key(|k| names::item(k.0));
     let keep = |seedling: u32| job.and_then(|j| j.peaks.iter().find(|p| p.0 == seedling)).map(|p| p.1 + jobs::SEEDLING_RESERVE);
     let entries = kinds
         .iter()
-        .map(|&(seedling, ripe, waiting)| {
+        .map(|&(seedling, growing, ripe, waiting)| {
             let crop = names::item(seedling).trim_start_matches("Seedling ").to_string();
-            let state = match (ripe, waiting) {
-                (0, 0) => "none ripe".to_string(),
-                (r, 0) => format!("{r} ripe"),
-                (0, w) => format!("{w} picked, waiting to be replanted"),
-                (r, w) => format!("{r} ripe, {w} waiting"),
-            };
+            let mut parts = Vec::new();
+            if growing > 0 {
+                parts.push(format!("{growing} growing"));
+            }
+            if ripe > 0 {
+                parts.push(format!("{ripe} ripe"));
+            }
+            if waiting > 0 {
+                parts.push(format!("{waiting} waiting for a seedling"));
+            }
+            let state = if parts.is_empty() { "none planted".to_string() } else { parts.join(", ") };
             let have = stock.get(&seedling).copied().unwrap_or(0);
             let seedlings = match keep(seedling) {
                 Some(k) => format!("{have} seedlings (keeps {k})"),
@@ -258,6 +266,11 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
         })
         .collect();
     nodes.push(Node::List { id: "crops".into(), entries });
+    // plants whose kind the table cannot tell (stages several plants share, trees)
+    let others = base.growing_near(entity, work::RADIUS).len().saturating_sub(known_growing);
+    if others > 0 {
+        nodes.push(Node::Text { text: format!("{others} other plant(s) growing (trees, bushes, kinds that cannot be told apart while young).") });
+    }
     nodes
 }
 

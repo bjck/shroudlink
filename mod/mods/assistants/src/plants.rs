@@ -39,6 +39,28 @@ pub fn crops() -> &'static HashMap<String, Crop> {
     })
 }
 
+/// Growing stage inventory guid -> the harvest inventory guid of its crop (`stage` rows).
+pub fn stages() -> &'static HashMap<String, String> {
+    static STAGES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    STAGES.get_or_init(|| {
+        TABLE
+            .lines()
+            .filter_map(|line| {
+                let p: Vec<&str> = line.split('\t').collect();
+                (p.len() >= 3 && p[0] == "stage").then(|| (p[1].to_string(), p[2].to_string()))
+            })
+            .collect()
+    })
+}
+
+/// The crop a stage belongs to (by its inventory guid), and whether it is the ripe one.
+pub fn crop_of(inventory: &str) -> Option<(&'static Crop, bool)> {
+    match crops().get(inventory) {
+        Some(crop) => Some((crop, true)),
+        None => crops().get(stages().get(inventory)?).map(|crop| (crop, false)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,5 +73,8 @@ mod tests {
         assert_eq!(crops().len(), 36);
         let bean = &crops()["18280ed9-7665-445f-ae97-8dadd3d820bb"];
         assert_eq!((crate::names::item(bean.seedling).as_str(), bean.harvest.len()), ("Seedling Vegetable Bean", 1));
+        // a bean seedling stage is known as a growing bean
+        let (crop, ripe) = crop_of("6cb7105a-7fe0-4265-b058-db5d4c26ed1c").unwrap();
+        assert_eq!((crop.name.as_str(), ripe), ("T7_Plant_Growth_Bean", false));
     }
 }

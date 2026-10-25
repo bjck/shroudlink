@@ -190,6 +190,9 @@ pub trait Base {
     fn mark_looted(&self, crop: u32) -> bool;
     /// A scatter-loot crop picked already (marked, nothing in it): it waits to be replanted.
     fn crop_picked(&self, crop: u32) -> bool;
+    /// The crop stages standing on plant roots around an entity, growing or ripe, of the
+    /// kinds the crop table knows: (stage, seedling of its crop, ripe).
+    fn crops_near(&self, entity: u32, radius: f64) -> Vec<(u32, u32, bool)>;
     /// Starts a ripe crop's plant over from its first growth stage (after its harvest was
     /// taken), as the game's growth does with each stage; false if that was not possible.
     fn replant(&self, crop: u32) -> bool;
@@ -417,6 +420,20 @@ impl Base for WorldBase<'_> {
         let d = self.world.component(crop, "DefaultInventory")?;
         let harvest = &crate::plants::crops().get(&crate::fishing::guid_text(&d)?)?.harvest;
         (*d.get(default_inventory::APPLIED)? == 0 && !harvest.is_empty()).then(|| harvest.clone())
+    }
+
+    fn crops_near(&self, entity: u32, radius: f64) -> Vec<(u32, u32, bool)> {
+        let roots: Vec<[f64; 3]> = self.world.entities_near(entity, radius + 2.0, "Growth").into_iter().filter_map(|r| self.world.position(r)).collect();
+        let near_root = |p: [f64; 3]| roots.iter().any(|r| (r[0] - p[0]).powi(2) + (r[1] - p[1]).powi(2) + (r[2] - p[2]).powi(2) < 2.25);
+        self.world
+            .entities_near(entity, radius, "DefaultInventory")
+            .into_iter()
+            .filter_map(|e| {
+                let guid = crate::fishing::guid_text(&self.world.component(e, "DefaultInventory")?)?;
+                let (crop, ripe) = crate::plants::crop_of(&guid)?;
+                self.world.position(e).is_some_and(near_root).then_some((e, crop.seedling, ripe))
+            })
+            .collect()
     }
 
     fn crop_picked(&self, crop: u32) -> bool {
