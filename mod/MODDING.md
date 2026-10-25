@@ -153,7 +153,7 @@ Windows are trees of nodes (`link/src/ui.rs`), drawn with the game's widgets:
 | `button` | framed button, lit under the cursor | `click` |
 | `toggle` | ON / OFF switch and label | `change {value}` |
 | `list` | clickable rows | `click {index}` |
-| `item_grid` | real inventory slots (icon, rarity; the item's name under the grid) | `click {index}` |
+| `item_grid` | real inventory slots (icon, rarity) with the game's item tooltip | `click {index}` |
 | `text_input` | framed field; click to type (keyboard is kept from the game) | `change {value}` on every edit (addon 0.6+), `submit {value}` on Enter |
 
 Labels must not contain `<`: the game's text starts a markup tag there and draws nothing

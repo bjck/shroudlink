@@ -390,6 +390,7 @@ pub fn draw(api: &Api) {
         unsafe {
             if page {
                 draw_page(&mut d, &mut ui, &mut pending);
+                draw_item_tip(&mut d);
             } else {
                 draw_huds(&mut d, &mut ui, screen != SCREEN_GAMEPLAY);
             }
@@ -445,6 +446,19 @@ pub fn after_panel_header(api: &Api, index: u8) {
 }
 
 /// HUD messages from mods, top centre, newest last.
+/// The game's tooltip for the item slot under the cursor, on its own layer above the page
+/// (on the page's layer the slot icons cover it).
+unsafe fn draw_item_tip(d: &mut Draw) {
+    let api = d.api;
+    let mut layer = Layer::new();
+    let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkItemTip"), LAYER_POPUP);
+    let mut root_frame = Frame::new();
+    api.open_root(&mut root_frame, root);
+    api.draw_item_tip();
+    api.close_frame(&mut root_frame);
+    api.end_layer(&mut layer);
+}
+
 /// Adds a toast; the same message again replaces the older one and counts: "… (×2)".
 fn add_note(notes: &mut Vec<(String, Instant)>, text: String) {
     let repeats = |shown: &str| -> Option<u32> {

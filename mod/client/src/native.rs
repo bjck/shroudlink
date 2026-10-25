@@ -68,6 +68,12 @@ const SIG_CLOSE_FRAME: &str = "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 60 80 7
 const SIG_TEXT_NEW: &str = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 50 48 8B DA 41 0F B6 F9";
 const SIG_TEXT_EMIT: &str = "40 55 56 57 48 8D 6C 24 B9 48 81 EC F0 00 00 00 0F 29 BC 24 B0 00 00 00";
 /// `doQrCodeViewerPopup`, only used to find the `GAME_UI` global (`mov rax, [rip+X]` at +0x13).
+/// `FUN_7ff62311def0`: makes the inventory screen's state (default slot records).
+const SIG_TIP_STATE_INIT: &str = "48 8B 05 ?? ?? ?? ?? 33 D2 48 89 41 08";
+/// `FUN_7ff62311e580(tooltip, slot record, comparison)`: builds an item tooltip.
+const SIG_TIP_INIT: &str = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 40 48 8B 05 ?? ?? ?? ??";
+/// `FUN_7ff623212e00(tooltip, rect)`: draws it next to the slot's rectangle.
+const SIG_TIP_DRAW: &str = "4C 8B DC 49 89 5B 10 57 48 81 EC 00 01 00 00";
 const SIG_QR_POPUP: &str = "4C 8B DC 55 57 49 8D AB 38 F8 FF FF";
 
 /// Text style used by `doSimpleTextTabs` (theme + 0x11b94).
@@ -127,6 +133,9 @@ type BackgroundFn = unsafe extern "system" fn(frame: *mut u8, desc: *const u8);
 /// 0xAABBGGRR, then f32 1.0). The 10th and 17th call in the background function.
 type FillFn = unsafe extern "system" fn(frame: *mut u8, rect: *const [f32; 4], colour: *const [u32; 2]);
 type SlotDescInitFn = unsafe extern "system" fn(desc: *mut u8) -> *mut u8;
+type TipStateInitFn = unsafe extern "system" fn(state: *mut u8) -> *mut u8;
+type TipInitFn = unsafe extern "system" fn(tip: *mut u8, slot: *const u8, compare: *const u8) -> *mut u8;
+type TipDrawFn = unsafe extern "system" fn(tip: *mut u8, rect: *const [f32; 4]);
 type ItemSlotFn = unsafe extern "system" fn(out: *mut u8, desc: *mut u8, compare: *mut u8, drag: usize) -> *mut u8;
 type SlotRenderFn = unsafe extern "system" fn(render: *mut u8, desc: *mut u8, state: usize, drag: usize);
 type PanelHeaderFn = unsafe extern "system" fn(panel: *mut c_void, index: u8, extra: u64);
@@ -167,7 +176,26 @@ pub struct Api {
     text_new: TextNewFn,
     text_emit: TextEmitFn,
     game_ui: usize,
+    tips: Option<ItemTips>,
 }
+
+/// The game's item tooltip, as the inventory screen (`FUN_7ff62319c4c0`) draws it: its
+/// slots record the hovered item in a screen state (0xbc8 bytes, made by
+/// `FUN_7ff62311def0`; the slot record at +0x50, its rectangle at +0xb58, comparison data
+/// at +0x248), and after the slots it builds the tooltip (`FUN_7ff62311e580`) and draws it
+/// at that rectangle (`FUN_7ff623212e00`).
+struct ItemTips {
+    state: *mut u8,
+    init: TipInitFn,
+    draw: TipDrawFn,
+}
+
+const TIP_STATE_SIZE: usize = 0xbc8;
+/// Where the tooltip of this frame opens at the earliest (f32 bits; 0: at its slot).
+static TIP_BESIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+const TIP_SLOT: usize = 0x50;
+const TIP_RECT: usize = 0xb58;
+const TIP_COMPARE: usize = 0x248;
 
 unsafe impl Send for Api {}
 unsafe impl Sync for Api {}
@@ -324,7 +352,9 @@ impl Api {
         *(desc.ptr().add(0x6c) as *mut f32) = size;
         let mut compare = Obj::<0x500>::new();
         let mut out = Obj::<0x40>::new();
-        self.item_slot.call(out.ptr(), desc.ptr(), compare.ptr(), 0);
+        // with a screen state the slot records the hovered item for its tooltip
+        let state = self.tips.as_ref().map_or(0, |t| t.state as usize);
+        self.item_slot.call(out.ptr(), desc.ptr(), compare.ptr(), state);
         // out starts with the slot rectangle
         let rect = *(out.ptr() as *const [f32; 4]);
         (mouse_click_in(rect), mouse_in(rect))
@@ -364,6 +394,64 @@ impl Api {
         let name = String::from_utf8_lossy(std::slice::from_raw_parts(out.ptr, out.len)).into_owned();
         names.insert(item, name.clone());
         Some(name)
+    }
+
+    /// Starts a frame of item slots with tooltips: no item hovered yet.
+    pub unsafe fn begin_item_tips(&self) {
+        if let Some(t) = &self.tips {
+            std::ptr::write_bytes(t.state.add(TIP_RECT), 0, 0x20);
+        }
+        TIP_BESIDE.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether item slots show the game's tooltip (else a mod page names the item itself).
+    pub fn has_item_tips(&self) -> bool {
+        self.tips.is_some()
+    }
+
+    /// The tooltip opens right of `x` (the grid's right edge): item icons are drawn after
+    /// the UI, so a tooltip over the grid would sit under them.
+    pub fn item_tip_beside(&self, x: f32) {
+        TIP_BESIDE.store(x.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The game's tooltip for the item slot under the cursor (drawn by `item_slot` since
+    /// `begin_item_tips`), with the stat comparison against what the player wears.
+    pub unsafe fn draw_item_tip(&self) {
+        let Some(t) = &self.tips else { return };
+        let mut rect = *(t.state.add(TIP_RECT) as *const [f32; 4]);
+        if rect[2] <= 0.0 || rect[3] <= 0.0 {
+            return;
+        }
+        let beside = f32::from_bits(TIP_BESIDE.load(std::sync::atomic::Ordering::Relaxed));
+        if beside > rect[0] + rect[2] {
+            rect[0] = beside - rect[2];
+        }
+        let mut tip = Obj::<0x800>::new();
+        (t.init)(tip.ptr(), t.state.add(TIP_SLOT), t.state.add(TIP_COMPARE));
+        // as the inventory screen sets them (offsets in its tooltip descriptor)
+        *(tip.ptr().add(0xbc) as *mut u32) = 2;
+        *(tip.ptr().add(0xc0) as *mut u32) = 1;
+        let colour = tip.ptr().add(0xcc) as *mut u32;
+        *colour = *colour & 0x00ff_ffff | 0xe500_0000;
+        *(tip.ptr().add(0xdc) as *mut f32) = 250.0;
+        *(tip.ptr().add(0x168) as *mut usize) = self.local_player().unwrap_or(0);
+        (t.draw)(tip.ptr(), &rect);
+    }
+
+    /// The local player's record in the game state, for the tooltip's comparison: the
+    /// entry of the player list (`state + 0x3060`, count at +0x3068, 0x8f70 bytes each)
+    /// whose id (+0) is the local player's (`state + 0x2c50`).
+    unsafe fn local_player(&self) -> Option<usize> {
+        let holder = self.holder()?;
+        let state = *((*(holder as *const usize)) as *const u8).add(0x38).cast::<usize>();
+        if state == 0 {
+            return None;
+        }
+        let id = *((state + 0x2c50) as *const i32);
+        let list = *((state + 0x3060) as *const usize);
+        let count = *((state + 0x3068) as *const usize);
+        (0..count.min(64)).map(|i| list + i * 0x8f70).find(|&p| *(p as *const i32) == id)
     }
 
     /// The game state holder (`*(GAME_UI + 0xd0)`), if a game is running.
@@ -648,6 +736,23 @@ unsafe extern "system" fn dispatch_hook() {
     crate::ui::draw(api);
 }
 
+/// The tooltip functions, if this game build has them (else item grids go without).
+fn item_tips(find: &dyn Fn(&str) -> Result<usize, String>) -> Option<ItemTips> {
+    let (state_init, init, draw) = match (find(SIG_TIP_STATE_INIT), find(SIG_TIP_INIT), find(SIG_TIP_DRAW)) {
+        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+        _ => {
+            log!("item tooltips off: a tooltip function was not found");
+            return None;
+        }
+    };
+    unsafe {
+        // lives as long as the addon copy: the slots and the tooltip read it every frame
+        let state = Box::leak(vec![0u128; TIP_STATE_SIZE / 16 + 1].into_boxed_slice()).as_mut_ptr() as *mut u8;
+        std::mem::transmute::<usize, TipStateInitFn>(state_init)(state);
+        Some(ItemTips { state, init: std::mem::transmute(init), draw: std::mem::transmute(draw) })
+    }
+}
+
 pub fn install(module: &Module) -> Result<(), String> {
     let find = |sig: &str| module.find(sig);
     let open_child = find(SIG_OPEN_CHILD)?;
@@ -693,6 +798,7 @@ pub fn install(module: &Module) -> Result<(), String> {
             text_new: std::mem::transmute::<usize, TextNewFn>(find(SIG_TEXT_NEW)?),
             text_emit: std::mem::transmute::<usize, TextEmitFn>(find(SIG_TEXT_EMIT)?),
             game_ui,
+            tips: item_tips(&find),
         };
         let api = API.get_or_init(|| api);
         api.dispatch.enable().map_err(|e| e.to_string())?;

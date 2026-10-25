@@ -293,6 +293,7 @@ unsafe fn draw_pieces(d: &mut super::Draw, owner: &str, window: &str, title: &st
                     let mut row = Frame::new();
                     api.open_row(&mut row, &key("shroudlinkPageSlotRow", &format!("{scope}/{id}"), r as u64), SLOT_GAP);
                     api.set_size(&row, width, SLOT);
+                    let grid_right = api.rect(&row)[0] + columns as f32 * (SLOT + SLOT_GAP);
                     for (c, item) in chunk.iter().enumerate() {
                         let (clicked, over) = api.item_slot(item.id, item.count, SLOT);
                         if clicked {
@@ -300,12 +301,13 @@ unsafe fn draw_pieces(d: &mut super::Draw, owner: &str, window: &str, title: &st
                         }
                         if over {
                             hovered = Some(*item);
+                            api.item_tip_beside(grid_right);
                         }
                     }
                     api.close_frame(&mut row);
                 }
-                // the name of the item under the cursor, in the game's language
-                if view.take(LINE) && any {
+                // the name of the item under the cursor, where the game's tooltip is missing
+                if !api.has_item_tips() && view.take(LINE) && any {
                     let name = hovered.map(|item| {
                         let name = api.item_display_name(item.id).unwrap_or_else(|| format!("item {}", item.id));
                         if item.count > 1 { format!("{name} ×{}", item.count) } else { name }
@@ -355,6 +357,7 @@ pub unsafe fn draw_windows(d: &mut super::Draw, owner: &str, windows: &mut [&mut
     api.open_column(&mut content, &d.key("shroudlinkPageScrolled"), GAP);
     api.set_size(&content, inner, height);
     let mut view = View { offset, height, y: 0.0, drawn: false };
+    api.begin_item_tips();
     for w in windows.iter_mut() {
         let (id, title) = (w.window.id.clone(), w.window.title.clone());
         draw_pieces(d, owner, &id, &title, &mut w.window.content, inner, &mut view, events);
