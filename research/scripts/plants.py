@@ -7,9 +7,9 @@ it is told apart at runtime by the harvest it holds (`ecs::DefaultInventory.defa
 Rows: crop <harvest inventory guid> <seedling item id> <plant root> <stage count> [harvest]
 Only plants whose last stage holds a harvest (crops, not trees) and that a seedling places.
 
-Some ripe stages are scatter loot (beans, pumpkins …): their `DefaultInventory` is applied
-only when a player picks them, so nothing is stored to take. With the `croploot_dump`
-export (`croploot.txt`) their row gets the harvest the inventory gives:
+A ripe stage's `DefaultInventory` is applied only when a player picks it (scatter loot like
+beans, and wheat, corn …), so nothing is stored to take. With the `croploot_dump` export
+(`croploot.txt`) every crop row gets the harvest the inventory gives:
 item:count,item:count (stacks that always spawn, at their least count).
 """
 import re
@@ -57,7 +57,7 @@ def main():
         # those standing on a plant root, so wild scatter loot is never mistaken for a crop
         if root in seed_of and inventory and inventory not in others:
             row = f"crop\t{inventory}\t{seed_of[root]}\t{names[root]}\t{len(levels)}"
-            if stage.startswith("Scatter_Loot") and inventory in loot:
+            if inventory in loot:
                 row += f"\t{loot[inventory]}"
             rows.append(row)
     # a ripe stage two plants share (cattails and papyrus) cannot tell which seedling it

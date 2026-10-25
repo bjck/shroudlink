@@ -1,34 +1,34 @@
-crop	711ab8e1-2101-40d5-bb9f-727b6711725a	1174705547	T1_Plant_Growth_BerryBushes	4
-crop	304ab9b0-dbe8-451e-8eb0-8f238c286cf5	3660770821	T1_Plant_Growth_Corn	3
-crop	87512047-0e21-4616-bbde-1a6e617d65d5	751481953	T1_Plant_Growth_Mushrooms_Red	3
-crop	925375d4-04ba-450d-821a-44581c3dd7bb	4047385314	T1_Plant_Growth_PlantFibre_Shrub	4
+crop	711ab8e1-2101-40d5-bb9f-727b6711725a	1174705547	T1_Plant_Growth_BerryBushes	4	3707271437:2
+crop	304ab9b0-dbe8-451e-8eb0-8f238c286cf5	3660770821	T1_Plant_Growth_Corn	3	3118804138:3
+crop	87512047-0e21-4616-bbde-1a6e617d65d5	751481953	T1_Plant_Growth_Mushrooms_Red	3	600862405:1
+crop	925375d4-04ba-450d-821a-44581c3dd7bb	4047385314	T1_Plant_Growth_PlantFibre_Shrub	4	1798662696:2,3316218728:4
 crop	cb6182e4-ee58-42b3-9bb5-d19b714a3988	2229826461	T1_Plant_Growth_Reed	5	1026141130:5
-crop	9668b921-adf5-406b-9004-463288540dbc	2762446918	T1_Plant_Growth_St_Johns_Worth	3
-crop	a745e1d8-9e93-43aa-b49f-ba2f3d4a09d0	1438935166	T1_Plant_Growth_Tomato	3
-crop	1c749952-a99c-4f62-9ba7-febdf4571f72	3776129035	T2_Plant_Growth_AzureRussula_GlowShroom	4
-crop	d66ed066-4f09-4944-b614-05b67fb2d3a5	2721454042	T2_Plant_Growth_Beets	3
-crop	1bd720c3-be1e-4d4f-8d3c-e3aae5fe0744	2542499127	T2_Plant_Growth_Chamomille	3
-crop	caa04b20-093a-4951-be2f-7c9a2675d4f3	1533027547	T2_Plant_Growth_Indigo	3
-crop	bdae0d9d-2e42-4d4d-b07c-61a240f822a2	2298603989	T2_Plant_Growth_Nettle	3
-crop	524c18e3-af3a-4684-a358-6961d67d95b6	4181548098	T2_Plant_Growth_Strawberry	3
-crop	08dedbb6-53a8-40e2-a95a-aee1b811c509	34487402	T3_Plant_Growth_Flax	3
-crop	de1d619b-7862-4adf-8529-ffc6fb85ef49	2330783516	T3_Plant_Growth_Pepper	3
-crop	e224c46f-2370-49c0-80d0-3a0a34f6bb95	3764454676	T3_Plant_Growth_Rooibos	3
-crop	240f0e2b-f240-46f5-a0ba-f527e2e38e5a	4018682338	T3_Plant_Growth_Sage	3
-crop	44e3569b-a894-4fa7-98a2-8d8b36bed2ff	34909120	T3_Plant_Growth_SugarCane	3
-crop	faa21dd8-0313-4fe7-841e-471ab69594ee	1811689543	T3_Plant_Growth_Wheat	3
-crop	e3f79d46-b927-429c-8528-79d0e17f5ffc	2024314426	T4_Plant_Growth_Desert_flower	3
-crop	6bc9d1b2-182c-408e-9aea-fdcbaddeef64	1898312963	T4_Plant_Growth_DevilsClaw	3
-crop	e3116db3-f257-4204-a77d-987353aeb916	1419248088	T4_Plant_Growth_Saffron	3
+crop	9668b921-adf5-406b-9004-463288540dbc	2762446918	T1_Plant_Growth_St_Johns_Worth	3	4180130855:1
+crop	a745e1d8-9e93-43aa-b49f-ba2f3d4a09d0	1438935166	T1_Plant_Growth_Tomato	3	1036540037:2
+crop	1c749952-a99c-4f62-9ba7-febdf4571f72	3776129035	T2_Plant_Growth_AzureRussula_GlowShroom	4	1304815894:2
+crop	d66ed066-4f09-4944-b614-05b67fb2d3a5	2721454042	T2_Plant_Growth_Beets	3	3542827745:1
+crop	1bd720c3-be1e-4d4f-8d3c-e3aae5fe0744	2542499127	T2_Plant_Growth_Chamomille	3	3478847834:1
+crop	caa04b20-093a-4951-be2f-7c9a2675d4f3	1533027547	T2_Plant_Growth_Indigo	3	4276529065:1
+crop	bdae0d9d-2e42-4d4d-b07c-61a240f822a2	2298603989	T2_Plant_Growth_Nettle	3	2290894589:2
+crop	524c18e3-af3a-4684-a358-6961d67d95b6	4181548098	T2_Plant_Growth_Strawberry	3	3479563223:1
+crop	08dedbb6-53a8-40e2-a95a-aee1b811c509	34487402	T3_Plant_Growth_Flax	3	3898847112:1
+crop	de1d619b-7862-4adf-8529-ffc6fb85ef49	2330783516	T3_Plant_Growth_Pepper	3	4094316095:1
+crop	e224c46f-2370-49c0-80d0-3a0a34f6bb95	3764454676	T3_Plant_Growth_Rooibos	3	1628543982:3
+crop	240f0e2b-f240-46f5-a0ba-f527e2e38e5a	4018682338	T3_Plant_Growth_Sage	3	3562500384:2
+crop	44e3569b-a894-4fa7-98a2-8d8b36bed2ff	34909120	T3_Plant_Growth_SugarCane	3	2456844314:2
+crop	faa21dd8-0313-4fe7-841e-471ab69594ee	1811689543	T3_Plant_Growth_Wheat	3	2435149273:1,3921293392:2
+crop	e3f79d46-b927-429c-8528-79d0e17f5ffc	2024314426	T4_Plant_Growth_Desert_flower	3	1024666423:1
+crop	6bc9d1b2-182c-408e-9aea-fdcbaddeef64	1898312963	T4_Plant_Growth_DevilsClaw	3	2065473526:1
+crop	e3116db3-f257-4204-a77d-987353aeb916	1419248088	T4_Plant_Growth_Saffron	3	3696168941:1
 crop	cd7520de-4c11-43f6-be0c-73ef52da583c	3622239347	T5_Plant_Growth_ColdHeights_Pumpkin	5	4234426543:3
-crop	3d1262d2-3616-4e8b-951a-62c0d495a002	1401264358	T5_Plant_Growth_Tentacle_ShroudAdhesive	2
-crop	dfa9523d-dd9e-41ec-b834-b437c6c3bc5b	3014637412	T5_Plant_Growth_Wolfsbane	3
-crop	5e892fee-107b-4813-9a7a-ff2592918449	961655092	T5_Plant_Growth_Yellow_Gentian	3
+crop	3d1262d2-3616-4e8b-951a-62c0d495a002	1401264358	T5_Plant_Growth_Tentacle_ShroudAdhesive	2	1047122195:2
+crop	dfa9523d-dd9e-41ec-b834-b437c6c3bc5b	3014637412	T5_Plant_Growth_Wolfsbane	3	1355070973:1
+crop	5e892fee-107b-4813-9a7a-ff2592918449	961655092	T5_Plant_Growth_Yellow_Gentian	3	3779366146:2
 crop	b69b9bd2-5d11-4e7b-b0ba-616db3f9b37e	1783208373	T5_Plant_YellowFogMushroom	4	1683685602:3
 crop	25c3d55c-c3e6-4a34-a0b5-9ea63535483e	2411338569	T6_Plant_Growth_Algae	5	806123624:3,2448218322:2
 crop	f679bc97-07cd-4668-a944-94bc199d19e1	1291967765	T6_Plant_Growth_Daylily	5	1897605064:3
 crop	ef461dd8-4de9-4a25-97b7-8516645ccff1	2601152870	T6_Plant_Growth_Ginger	4	814096701:3
-crop	7174e65c-060a-4cdf-bf6f-df00cebe1c8d	3520367051	T6_Plant_Growth_Rice	3
+crop	7174e65c-060a-4cdf-bf6f-df00cebe1c8d	3520367051	T6_Plant_Growth_Rice	3	2374813707:1
 crop	240d4540-9393-46df-8728-8425be75e389	420003849	T6_Plant_Growth_Shiitake	5	3354704185:3
 crop	bd20bb16-9b0f-49c6-982e-052ccb9071c7	3196395822	T6_Plant_Growth_Taro	5	2417552370:3
 crop	18280ed9-7665-445f-ae97-8dadd3d820bb	2816539508	T7_Plant_Growth_Bean	5	3317538148:3
