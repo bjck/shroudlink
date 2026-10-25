@@ -21,8 +21,8 @@ ToClient::Close { owner: "my_mod".into(), id: "main".into() }
 | `Text { text }`, `Heading { text }`, `Separator` | |
 | `Row { children }` | |
 | `Button { id, label }` | `Click` |
-| `Toggle { id, label, value }` | `Change { value: bool }` |
-| `TextInput { id, value, hint }` | `Submit { value }` on Enter |
+| `Toggle { id, label, value }` (an ON / OFF switch) | `Change { value: bool }` |
+| `TextInput { id, value, hint }` | `Change { value }` on every edit (addon 0.6+), `Submit { value }` on Enter |
 | `List { id, entries }` (flows into columns of 6) | `Click { index }` |
 | `ItemGrid { id, columns, items: [Item { id, count }] }` (real item slots with icons and tooltips) | `Click { index }` |
 
@@ -52,7 +52,7 @@ They work on the player's **backpack** slots, on menu screens (chest screen and 
 | `ToClient::Marks { owner, marks: [Mark { slots, style: Rim \| Dim }] }` | gold rim or faded drawing; replaces your previous marks |
 | `ToClient::Store { owner, data }` | keeps JSON on the player's PC for this server |
 | `ToClient::Section { owner, id, nodes }` | rows in the chest screen's backpack panel, below its title; no nodes removes them; events come as `ui_event` with `window = id` |
-| `ToClient::Notify { owner, text }` | a HUD message for 6 s |
+| `ToClient::Notify { owner, text }` | a framed message for 8 s (at most 3 at a time, repeats counted) |
 | `ToClient::Hud { owner, id, title, rows: [HudRow { label, value, fraction }] }` | a small see-through panel on the HUD (bottom right, also while playing); a gold bar under each row filled to `fraction` (0..1, 0: none); players drag it while a menu is open; no rows removes it. Send only changes |
 
 | Addon → server (`FromClient::from_message(message)`) | |

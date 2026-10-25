@@ -123,6 +123,9 @@ const PLAYER_MENU_TABS: usize = 7;
 const TAB_ENTRY_SIZE: usize = 0x40;
 type OpenRowFn = OpenColumnFn;
 type BackgroundFn = unsafe extern "system" fn(frame: *mut u8, desc: *const u8);
+/// `FUN_7ff62304a800(frame, rect, colour)`: a solid rectangle (screen UI units; colour
+/// 0xAABBGGRR, then f32 1.0). The 10th and 17th call in the background function.
+type FillFn = unsafe extern "system" fn(frame: *mut u8, rect: *const [f32; 4], colour: *const [u32; 2]);
 type SlotDescInitFn = unsafe extern "system" fn(desc: *mut u8) -> *mut u8;
 type ItemSlotFn = unsafe extern "system" fn(out: *mut u8, desc: *mut u8, compare: *mut u8, drag: usize) -> *mut u8;
 type SlotRenderFn = unsafe extern "system" fn(render: *mut u8, desc: *mut u8, state: usize, drag: usize);
@@ -147,6 +150,7 @@ pub struct Api {
     tab_widget: GenericDetour<TabWidgetFn>,
     open_row: OpenRowFn,
     background: BackgroundFn,
+    fill: FillFn,
     slot_desc_init: SlotDescInitFn,
     item_slot: GenericDetour<ItemSlotFn>,
     slot_render: GenericDetour<SlotRenderFn>,
@@ -289,11 +293,21 @@ impl Api {
     }
 
     /// Panel background in one of the game's styles (0..=10; the QR popup uses 8).
+    /// Descriptor (FUN_7ff6232fd910): +0 style, +4 opacity of the whole background, +8 the
+    /// highlight look, +0x68 two {rect, colour} rectangles, +0x98 their count. Styles 4–6
+    /// reach past the frame on one side, and every style ends with a texture that masks
+    /// what it drew (style 7 fades towards the top): solid boxes use `fill`.
     pub unsafe fn background(&self, frame: &mut Frame, style: u32, alpha: f32) {
         let mut desc = [0u32; 0x40];
         desc[0] = style;
         desc[1] = alpha.to_bits();
         (self.background)(frame.ptr(), desc.as_ptr() as *const u8);
+    }
+
+    /// A solid rectangle on `frame`, drawn without any panel texture (whose mask would fade
+    /// it at the edges). `rect` is on screen in UI units, e.g. a frame's last layout rect.
+    pub unsafe fn fill(&self, frame: &mut Frame, rect: [f32; 4], colour: u32) {
+        (self.fill)(frame.ptr(), &rect, &[colour, 1.0f32.to_bits()]);
     }
 
     /// An inventory slot showing `count` x `item` (icon, rarity frame): (clicked, mouse over
@@ -652,6 +666,13 @@ pub fn install(module: &Module) -> Result<(), String> {
                 .map_err(|e| e.to_string())?,
             open_row: std::mem::transmute::<usize, OpenRowFn>(find(SIG_OPEN_ROW)?),
             background: std::mem::transmute::<usize, BackgroundFn>(find(SIG_BACKGROUND)?),
+            fill: {
+                let calls = chestsort_common::scan::call_targets(find(SIG_BACKGROUND)?, 0x1000);
+                match (calls.get(9), calls.get(16)) {
+                    (Some(&a), Some(&b)) if a == b => std::mem::transmute::<usize, FillFn>(a),
+                    _ => return Err("background: no rectangle fill at calls 10 and 17".into()),
+                }
+            },
             slot_desc_init: std::mem::transmute::<usize, SlotDescInitFn>(find(SIG_SLOT_DESC_INIT)?),
             item_slot: GenericDetour::new(std::mem::transmute::<usize, ItemSlotFn>(find(SIG_ITEM_SLOT)?), item_slot_hook)
                 .map_err(|e| e.to_string())?,

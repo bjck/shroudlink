@@ -65,9 +65,12 @@ A mod can:
   `event.known()` decodes the common ones. `examples/hello_mod` announces deaths and
   level-ups.
 - work with the **world** from any callback (`host.world()`): players, positions,
-  teleport, any component, nearby inventories, moving stacks, and vanilla **buffs**
+  teleport, any component, nearby inventories and entities with a component
+  (`entities_near`), moving stacks or exact counts (`move_items`), creating and removing plain items
+  (`give_items`, `remove_items`), and vanilla **buffs**
   (`apply_buff`, through the game's impact VM: `server/src/buffs.rs`). `on_tick` runs
-  about once a second. `mods/travel`, `mods/storage` and `mods/lantern` use them.
+  about once a second. `mods/travel`, `mods/storage`, `mods/lantern` and `mods/assistants`
+  use them.
 
 Equipped items, the item in hand and the actionbar are always protected by the core.
 `mods/chestsort` is a complete real-world mod (categories, sorting, locks, UI with tests).
@@ -144,20 +147,27 @@ Windows are trees of nodes (`link/src/ui.rs`), drawn with the game's widgets:
 
 | node | shows | events |
 |---|---|---|
-| `text`, `heading` | game font, body / title style | – |
-| `separator` | vertical space | – |
+| `text`, `heading` | game font, body / title style (text wraps; a heading gets a gold line) | – |
+| `separator` | gold line | – |
 | `row` | children side by side | – |
-| `button` | clickable label | `click` |
-| `toggle` | [x] / [ ] label | `change {value}` |
+| `button` | framed button, lit under the cursor | `click` |
+| `toggle` | ON / OFF switch and label | `change {value}` |
 | `list` | clickable rows | `click {index}` |
-| `item_grid` | real inventory slots (icon, rarity, tooltip) | `click {index}` |
-| `text_input` | framed field; click to type (keyboard is kept from the game) | `submit {value}` on Enter |
+| `item_grid` | real inventory slots (icon, rarity; the item's name under the grid) | `click {index}` |
+| `text_input` | framed field; click to type (keyboard is kept from the game) | `change {value}` on every edit (addon 0.6+), `submit {value}` on Enter |
+
+Labels must not contain `<`: the game's text starts a markup tag there and draws nothing
+after it (use « and »). A button next to a text field (Order) gets the typed text from the
+`change` events, as `submit` only comes with Enter.
 
 Messages: server → client `{"mod":"ui","op":"open"|"close"|"entries", "owner": ...}`;
 client → server `{"mod":"<owner>","op":"ui_event","event":{"window","node","event"}}`.
-Mods live on their own **MODS tab** in the player menu (next to SKILLS): mod entries on the
-left, the selected mod's windows on the right. Windows opened while another screen with a
-cursor is shown (e.g. a chest) appear as panels on the right.
+Mods live on their own **MODS tab** in the player menu (next to SKILLS; key **K**, also
+while playing, `shroudlink_keys.json` `{"mods": "K"}` changes it): mod entries with their
+ON/OFF switch on the left, the selected mod's windows on the right. A window may be longer
+than the page: the page scrolls (mouse wheel, scroll bar), and only the parts in view are
+drawn. Notifications (`notify`) show as framed messages for 8 s, at most 3 at a time (a
+repeat counts up, "(×2)"): at the top while playing, at the bottom over menus.
 
 ## Built-in client features
 - **Slot building blocks** (above): keys, marks, storage (`shroudlink_store.json` next to the
@@ -184,6 +194,14 @@ cursor is shown (e.g. a chest) appear as panels on the right.
 - Mod buttons test the cursor against their layout rectangle (`node+0x114`, UI units of a
   1920x1080 reference) instead of the game's interaction state, which misfires when a window
   is replaced from outside.
+- Alignment (`node+0x6c`) places a frame in its parent, not its children: centre a label
+  with padding.
+- Panel backgrounds (`FUN_7ff6232fd910`, descriptor: +0 style, +4 opacity, +8 highlight,
+  +0x68 two coloured rectangles, +0x98 their count): styles 4–6 reach past the frame on one
+  side, 0 is the gold divider, and every style ends with a texture that masks what it drew
+  (style 7 fades towards the top; a style without a texture masks everything away). Solid
+  boxes use the game's rectangle fill (`FUN_7ff62304a800`, the 10th call in the background
+  function) directly. Colours are 0xAABBGGRR and show brighter than written.
 
 ## Files
 | path | role |

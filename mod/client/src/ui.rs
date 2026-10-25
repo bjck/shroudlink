@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::native::{Api, Frame, Layer, UiStr, LAYER_HUD, LAYER_POPUP, STYLE_TAB_TEXT, STYLE_TITLE, STYLE_TOP_TAB};
 
+mod page;
+
 pub struct OpenWindow {
     pub owner: String,
     pub window: Window,
@@ -71,8 +73,9 @@ pub fn snapshot() -> Value {
 }
 
 /// How long a notification stays, and how many are shown at once.
-const NOTE_SECONDS: u64 = 6;
-const NOTES_MAX: usize = 4;
+const NOTE_SECONDS: u64 = 8;
+/// Toasts on screen at once; older ones make room.
+const NOTES_MAX: usize = 3;
 /// Width of mod sections in the backpack panel (the search field's row).
 const SECTION_WIDTH: f32 = 530.0;
 
@@ -111,7 +114,8 @@ const PAGE_HEIGHT: f32 = 880.0;
 const PAGE_TOP: f32 = 140.0;
 const PAGE_LIST_WIDTH: f32 = 340.0;
 /// Background of the MODS page: the plain blue panel.
-const PAGE_STYLE: u32 = 5;
+const PAGE_STYLE: u32 = 7;
+const PAGE_ALPHA: f32 = 0.97;
 /// Entries per column of a list node.
 const LIST_ROWS: usize = 6;
 
@@ -125,7 +129,6 @@ static FOCUS: AtomicU64 = AtomicU64::new(0);
 const TEXT_INPUT_WIDTH: f32 = 520.0;
 const TEXT_INPUT_MAX: usize = 64;
 /// Background of text fields: blue panel with a fine edge.
-const TEXT_INPUT_STYLE: u32 = 3;
 /// Game tab index when the page was opened; choosing another game tab closes the page.
 static PAGE_GAME_TAB: AtomicU64 = AtomicU64::new(u64::MAX);
 /// Index into the mod menu of the entry shown on the page.
@@ -185,18 +188,41 @@ pub fn mods_page_open() -> bool {
 pub fn draw_mods_tab(api: &Api) {
     TAB_FRAME.store(FRAME.load(Ordering::Relaxed), Ordering::Relaxed);
     let label = if mods_page_open() { "» Mods «" } else { "Mods" };
-    if unsafe { api.text_button(label, STYLE_TOP_TAB, shroudlink::string_id(b"shroudlinkModsTab")) } {
-        let open = !mods_page_open();
-        PAGE_OPEN.store(open, Ordering::Relaxed);
-        save_page();
-        PAGE_GAME_TAB.store(unsafe { api.player_tab() }.unwrap_or(u64::MAX), Ordering::Relaxed);
-        if open {
-            if let Some((owner, entry)) = UI.lock().unwrap().menu.get(PAGE_SELECTED.load(Ordering::Relaxed) as usize).cloned() {
-                crate::link::send(UiEvent { window: String::new(), node: entry.id, event: Event::Menu }.to_message(&owner));
-            }
+    unsafe {
+        // like the game's tabs: the key above the name
+        let mut tab = Frame::new();
+        api.open_column(&mut tab, &UiStr::name("shroudlinkModsTabColumn"), 2.0);
+        api.set_alignment(&tab, 0x0101);
+        let mut cap = Frame::new();
+        api.open_column(&mut cap, &UiStr::name("shroudlinkModsTabKey"), 0.0);
+        api.set_size(&cap, 26.0, 26.0);
+        api.set_padding(&cap, [7.0, 1.0, 0.0, 0.0]);
+        page::boxed(api, &mut cap, page::BOX, Some(page::RIM));
+        api.text(&crate::input::mods_key().to_string(), STYLE_TAB_TEXT);
+        api.close_frame(&mut cap);
+        let clicked = api.text_button(label, STYLE_TOP_TAB, shroudlink::string_id(b"shroudlinkModsTab"));
+        api.close_frame(&mut tab);
+        if clicked {
+            set_page_open(api, !mods_page_open());
         }
     }
 }
+
+/// Opens or closes the MODS page in the player menu (as a click on its tab does).
+fn set_page_open(api: &Api, open: bool) {
+    PAGE_OPEN.store(open, Ordering::Relaxed);
+    save_page();
+    PAGE_GAME_TAB.store(unsafe { api.player_tab() }.unwrap_or(u64::MAX), Ordering::Relaxed);
+    if open {
+        if let Some((owner, entry)) = UI.lock().unwrap().menu.get(PAGE_SELECTED.load(Ordering::Relaxed) as usize).cloned() {
+            crate::link::send(UiEvent { window: String::new(), node: entry.id, event: Event::Menu }.to_message(&owner));
+        }
+    }
+}
+
+/// The MODS key was pressed while playing: the player menu is opening, the MODS page
+/// follows (until this time).
+static OPEN_WITH_MENU: Mutex<Option<Instant>> = Mutex::new(None);
 
 fn handle(message: &Value) {
     let mut m = message.clone();
@@ -258,7 +284,7 @@ fn handle(message: &Value) {
             if !crate::switches::is_on(&owner) {
                 return;
             }
-            ui.notes.push((text, Instant::now()));
+            add_note(&mut ui.notes, text);
             let excess = ui.notes.len().saturating_sub(NOTES_MAX);
             ui.notes.drain(..excess);
         }
@@ -319,6 +345,25 @@ pub fn draw(api: &Api) {
         }
         let frame = FRAME.fetch_add(1, Ordering::Relaxed);
         let menu_visible = TAB_FRAME.load(Ordering::Relaxed) == frame;
+        // the MODS key: in the player menu it opens the page, while playing the menu first
+        if crate::input::take_mods_key() {
+            log!("ui: mods key on screen {screen:#04x}, menu {menu_visible}");
+            if menu_visible {
+                drop(ui);
+                set_page_open(api, !mods_page_open());
+                ui = UI.lock().unwrap();
+            } else if screen == SCREEN_GAMEPLAY {
+                crate::input::press_menu_key();
+                *OPEN_WITH_MENU.lock().unwrap() = Some(Instant::now() + Duration::from_secs(2));
+            }
+        }
+        let waiting = OPEN_WITH_MENU.lock().unwrap().filter(|until| Instant::now() < *until);
+        if waiting.is_some() && menu_visible {
+            *OPEN_WITH_MENU.lock().unwrap() = None;
+            drop(ui);
+            set_page_open(api, true);
+            ui = UI.lock().unwrap();
+        }
         if mods_page_open() && (!menu_visible || unsafe { api.player_tab() } != Some(PAGE_GAME_TAB.load(Ordering::Relaxed))) {
             // player menu closed or another game tab chosen
             PAGE_OPEN.store(false, Ordering::Relaxed);
@@ -346,9 +391,9 @@ pub fn draw(api: &Api) {
             if page {
                 draw_page(&mut d, &mut ui, &mut pending);
             } else {
-                draw_notes(&mut d, &ui.notes);
                 draw_huds(&mut d, &mut ui, screen != SCREEN_GAMEPLAY);
             }
+            draw_notes(&mut d, &ui.notes, screen != SCREEN_GAMEPLAY);
         }
         for (owner, id) in &pending.closed {
             ui.windows.retain(|w| !(&w.owner == owner && &w.window.id == id));
@@ -400,21 +445,55 @@ pub fn after_panel_header(api: &Api, index: u8) {
 }
 
 /// HUD messages from mods, top centre, newest last.
-unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)]) {
+/// Adds a toast; the same message again replaces the older one and counts: "… (×2)".
+fn add_note(notes: &mut Vec<(String, Instant)>, text: String) {
+    let repeats = |shown: &str| -> Option<u32> {
+        let rest = shown.strip_prefix(text.as_str())?;
+        if rest.is_empty() {
+            return Some(1);
+        }
+        rest.strip_prefix(" (×")?.strip_suffix(')')?.parse().ok()
+    };
+    match notes.iter().position(|(shown, _)| repeats(shown).is_some()) {
+        Some(i) => {
+            let n = repeats(&notes.remove(i).0).unwrap_or(1) + 1;
+            notes.push((format!("{text} (×{n})"), Instant::now()));
+        }
+        None => notes.push((text, Instant::now())),
+    }
+}
+
+/// Messages of mods as toasts: at the top while playing; over menus (`over_menu`) at the
+/// bottom, above the game's key hints, where they cover no page title.
+unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)], over_menu: bool) {
     if notes.is_empty() {
         return;
     }
     let api = d.api;
     let mut layer = Layer::new();
-    let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkNotes"), LAYER_HUD);
+    let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkNotes"), if over_menu { LAYER_POPUP } else { LAYER_HUD });
     let mut root_frame = Frame::new();
     api.open_root(&mut root_frame, root);
     let mut column = Frame::new();
-    api.open_column(&mut column, &d.key("shroudlinkNotes"), 4.0);
-    api.set_alignment(&column, 0x0102);
-    api.set_padding(&column, [0.0, 160.0, 0.0, 0.0]);
-    for (text, _) in notes {
+    api.open_column(&mut column, &d.key("shroudlinkNotes"), 8.0);
+    if over_menu {
+        api.set_alignment(&column, 0x0302);
+        api.set_padding(&column, [0.0, 0.0, 0.0, 90.0]);
+    } else {
+        api.set_alignment(&column, 0x0102);
+        api.set_padding(&column, [0.0, 160.0, 0.0, 0.0]);
+    }
+    for (i, (text, _)) in notes.iter().enumerate() {
+        // as wide as the text (title glyphs are about 11.5 units), centred in it
+        let width = (text.chars().count() as f32 * 11.5 + 56.0).min(1400.0);
+        let mut toast = Frame::new();
+        api.open_column(&mut toast, &ident("shroudlinkNote", "notes", i as u64), 0.0);
+        api.set_size(&toast, width, 48.0);
+        api.set_alignment(&toast, 0x0102);
+        api.set_padding(&toast, [28.0, 9.0, 0.0, 0.0]);
+        page::boxed(api, &mut toast, page::BOX_TOAST, Some(page::RIM));
         api.text(text, STYLE_TITLE);
+        api.close_frame(&mut toast);
     }
     api.close_frame(&mut column);
     api.close_frame(&mut root_frame);
@@ -620,7 +699,7 @@ unsafe fn text_field(d: &mut Draw, key: &UiStr, value: &mut String, hint: &str, 
     api.open_column(&mut field, key, 0.0);
     api.set_size(&field, width, TEXT_HEIGHT + 12.0);
     api.set_padding(&field, [10.0, 6.0, 10.0, 6.0]);
-    api.background(&mut field, TEXT_INPUT_STYLE, 1.0);
+    page::boxed(api, &mut field, 0xe0180e0a, Some(if focused { page::RIM_HOVER } else { page::RIM }));
     let shown = if focused {
         format!("{value}|")
     } else if value.is_empty() {
@@ -683,7 +762,8 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     api.open_row(&mut page, &d.key("shroudlinkPageRow"), 24.0);
     api.set_size(&page, PAGE_WIDTH, PAGE_HEIGHT);
     api.set_padding(&page, PADDING);
-    api.background(&mut page, PAGE_STYLE, 1.0);
+    // opaque: the game's own tab is drawn behind the page
+    api.background(&mut page, PAGE_STYLE, PAGE_ALPHA);
 
 
     // left: one entry per mod menu item
@@ -698,17 +778,13 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
         let scope = format!("{owner}/{}", entry.id);
         let mut row = Frame::new();
         api.open_row(&mut row, &ident("shroudlinkModRow", &scope, 0), 8.0);
-        api.set_size(&row, PAGE_LIST_WIDTH, TEXT_HEIGHT);
+        api.set_size(&row, PAGE_LIST_WIDTH, 40.0);
         // the switch: a mod switched off stays listed, so it can be switched on again
-        if api.text_button(if on { "[x]" } else { "[ ]" }, STYLE_TAB_TEXT, ident("shroudlinkModSwitch", &scope, 0).id()) {
+        if page::switch(d, &ident("shroudlinkModSwitch", &scope, 0), on, 64.0, 36.0) {
             toggled = Some(owner.clone());
         }
-        let label = match (i == selected, on) {
-            (true, _) => format!("» {}", entry.label),
-            (false, true) => entry.label.clone(),
-            (false, false) => format!("{} (off)", entry.label),
-        };
-        if api.text_button(&label, STYLE_TAB_TEXT, ident("shroudlinkModEntry", &scope, 0).id()) {
+        let label = if on { entry.label.clone() } else { format!("{} (off)", entry.label) };
+        if page::button(d, &ident("shroudlinkModEntry", &scope, 0), &label, PAGE_LIST_WIDTH - 72.0, 36.0, i == selected) {
             PAGE_SELECTED.store(i as u64, Ordering::Relaxed);
             save_page();
             if on {
@@ -738,14 +814,11 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     api.set_size(&content, width, PAGE_HEIGHT - PADDING[1] - PADDING[3]);
     if let Some((_, entry)) = ui.menu.get(selected).filter(|(o, _)| !crate::switches::is_on(o)) {
         api.text(&format!("{} is switched off on this PC", entry.label), STYLE_TITLE);
-        api.text("Its windows, panels, marks and keys are hidden here; on the server it keeps running. Tick [ ] to switch it on.", STYLE_TAB_TEXT);
+        api.text("Its windows, panels, marks and keys are hidden here; on the server it keeps running. Click OFF to switch it on.", STYLE_TAB_TEXT);
     }
-    for w in ui.windows.iter_mut().filter(|w| Some(&w.owner) == owner.as_ref() && crate::switches::is_on(&w.owner)) {
-        api.text(&w.window.title, STYLE_TITLE);
-        let window_id = w.window.id.clone();
-        for (i, node) in w.window.content.iter_mut().enumerate() {
-            draw_node(d, &w.owner, &window_id, &i.to_string(), node, width, pending);
-        }
+    if let Some(owner) = owner.as_ref().filter(|o| crate::switches::is_on(o)) {
+        let mut shown: Vec<&mut OpenWindow> = ui.windows.iter_mut().filter(|w| &w.owner == owner).collect();
+        page::draw_windows(d, owner, &mut shown, width, PAGE_HEIGHT - PADDING[1] - PADDING[3] - 10.0, &mut pending.events);
     }
     api.close_frame(&mut content);
 
@@ -863,5 +936,21 @@ unsafe fn draw_node(d: &mut Draw, owner: &str, window: &str, path: &str, node: &
             api.text(&name.unwrap_or_default(), STYLE_TAB_TEXT);
             api.close_frame(&mut grid);
         }
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn a_repeated_message_counts_instead_of_stacking() {
+        let mut notes = Vec::new();
+        add_note(&mut notes, "Fish caught.".into());
+        add_note(&mut notes, "Order done.".into());
+        add_note(&mut notes, "Fish caught.".into());
+        add_note(&mut notes, "Fish caught.".into());
+        let texts: Vec<&str> = notes.iter().map(|n| n.0.as_str()).collect();
+        assert_eq!(texts, vec!["Order done.", "Fish caught. (×3)"]);
     }
 }

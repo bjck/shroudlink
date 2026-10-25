@@ -87,20 +87,34 @@ fn answer(request: &str) -> Value {
     }
 }
 
+/// Set when this copy is replaced (hot reload): its listener lets the port go.
+static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn start() {
     if !enabled() {
         return;
     }
     std::thread::spawn(|| {
-        let listener = match TcpListener::bind(ADDRESS) {
-            Ok(l) => l,
-            Err(e) => {
-                log!("automation: cannot listen on {ADDRESS} ({e})");
-                return;
+        // a replaced copy frees the port a moment after its shutdown
+        let mut tries = 0;
+        let listener = loop {
+            match TcpListener::bind(ADDRESS) {
+                Ok(l) => break l,
+                Err(_) if tries < 20 => {
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => {
+                    log!("automation: cannot listen on {ADDRESS} ({e})");
+                    return;
+                }
             }
         };
         log!("automation: listening on {ADDRESS}");
         for stream in listener.incoming().flatten() {
+            if STOPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
             std::thread::spawn(move || {
                 let mut writer = match stream.try_clone() {
                     Ok(w) => w,
@@ -114,5 +128,16 @@ pub fn start() {
                 }
             });
         }
+        log!("automation: stopped listening");
     });
+}
+
+/// Closes the listener (this copy is being replaced): the waiting `accept` is woken by a
+/// connection of our own.
+pub fn stop() {
+    if !enabled() {
+        return;
+    }
+    STOPPED.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = std::net::TcpStream::connect(ADDRESS);
 }

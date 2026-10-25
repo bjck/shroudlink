@@ -5,7 +5,7 @@
 //! from the game (otherwise typing "j" would switch to the journal tab).
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use chestsort_common::log;
@@ -27,6 +27,60 @@ pub enum Key {
 }
 
 static FOCUSED: AtomicBool = AtomicBool::new(false);
+
+/// Mouse wheel turned since the last `take_wheel`, in notches * 120 (positive: away from
+/// the user). From `WM_MOUSEWHEEL`, or from raw input if that message never comes.
+static WHEEL: AtomicI32 = AtomicI32::new(0);
+static RAW_WHEEL: AtomicI32 = AtomicI32::new(0);
+static WHEEL_MESSAGES: AtomicBool = AtomicBool::new(false);
+const WM_MOUSEWHEEL: u32 = 0x020a;
+
+/// The key that opens the MODS page (a letter's virtual key; `shroudlink_keys.json`
+/// `{"mods": "K"}` in the game folder changes it), and whether it was pressed.
+static MODS_KEY: AtomicU32 = AtomicU32::new(0);
+static MODS_KEY_PRESSED: AtomicBool = AtomicBool::new(false);
+
+/// The letter of the MODS key (read once from `shroudlink_keys.json`, default K).
+pub fn mods_key() -> char {
+    let mut vk = MODS_KEY.load(Ordering::Relaxed);
+    if vk == 0 {
+        let chosen = std::fs::read_to_string(chestsort_common::game_dir().join("shroudlink_keys.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v["mods"].as_str().and_then(|s| s.chars().next()))
+            .map(|c| c.to_ascii_uppercase())
+            .filter(char::is_ascii_uppercase)
+            .unwrap_or('K');
+        vk = chosen as u32;
+        MODS_KEY.store(vk, Ordering::Relaxed);
+    }
+    char::from_u32(vk).unwrap_or('K')
+}
+
+/// True once after the MODS key was pressed (not while a text field has focus).
+pub fn take_mods_key() -> bool {
+    MODS_KEY_PRESSED.swap(false, Ordering::Relaxed)
+}
+
+/// Taps the game's key for the player menu's backpack tab (B, as its tab bar shows), as
+/// the player would.
+pub fn press_menu_key() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE};
+    const B_SCAN: u16 = 0x30;
+    let key = |up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: 0, wScan: B_SCAN, dwFlags: KEYEVENTF_SCANCODE | if up { KEYEVENTF_KEYUP } else { 0 }, time: 0, dwExtraInfo: 0 } },
+    };
+    let inputs = [key(false), key(true)];
+    unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32) };
+}
+
+/// The wheel movement since the last call (the input is not taken from the game).
+pub fn take_wheel() -> i32 {
+    let raw = RAW_WHEEL.swap(0, Ordering::Relaxed);
+    let legacy = WHEEL.swap(0, Ordering::Relaxed);
+    if WHEEL_MESSAGES.load(Ordering::Relaxed) { legacy } else { raw }
+}
 /// While a search field is on screen, typing "/" jumps into it.
 static SEARCH_HOTKEY: AtomicBool = AtomicBool::new(false);
 static SEARCH_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -90,6 +144,15 @@ pub fn take_keys() -> Vec<Key> {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if msg == WM_KEYDOWN && lparam & (1 << 30) == 0 && !FOCUSED.load(Ordering::Relaxed) && wparam as u32 == mods_key() as u32 {
+        MODS_KEY_PRESSED.store(true, Ordering::Relaxed);
+    }
+    if msg == WM_MOUSEWHEEL {
+        WHEEL_MESSAGES.store(true, Ordering::Relaxed);
+        WHEEL.fetch_add((wparam >> 16) as u16 as i16 as i32, Ordering::Relaxed);
+    } else if msg == WM_INPUT {
+        RAW_WHEEL.fetch_add(raw_wheel(lparam), Ordering::Relaxed);
+    }
     if !FOCUSED.load(Ordering::Relaxed) && SEARCH_HOTKEY.load(Ordering::Relaxed) && msg == WM_CHAR && wparam == '/' as usize {
         SEARCH_REQUESTED.store(true, Ordering::Relaxed);
         return 0;
@@ -133,6 +196,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
     let original: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT = std::mem::transmute(ORIGINAL.load(Ordering::Relaxed));
     CallWindowProcW(Some(original), hwnd, msg, wparam, lparam)
+}
+
+/// The wheel movement in a raw mouse input message (0 for anything else).
+unsafe fn raw_wheel(lparam: LPARAM) -> i32 {
+    use windows_sys::Win32::UI::Input::{GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTHEADER, RID_INPUT, RIM_TYPEMOUSE};
+    const RI_MOUSE_WHEEL: u16 = 0x0400;
+    let mut raw: RAWINPUT = std::mem::zeroed();
+    let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+    let got = GetRawInputData(lparam as HRAWINPUT, RID_INPUT, &mut raw as *mut RAWINPUT as *mut _, &mut size, std::mem::size_of::<RAWINPUTHEADER>() as u32);
+    if got == u32::MAX || got == 0 || raw.header.dwType != RIM_TYPEMOUSE {
+        return 0;
+    }
+    let buttons = raw.data.mouse.Anonymous.Anonymous;
+    if buttons.usButtonFlags & RI_MOUSE_WHEEL != 0 { buttons.usButtonData as i16 as i32 } else { 0 }
 }
 
 /// True for a raw input message that is a keyboard key press (not a release, not mouse).
