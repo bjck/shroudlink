@@ -395,7 +395,7 @@ pub fn draw(api: &Api) {
             } else {
                 draw_huds(&mut d, &mut ui, screen != SCREEN_GAMEPLAY);
             }
-            draw_notes(&mut d, &ui.notes, screen != SCREEN_GAMEPLAY);
+            draw_notes(&mut d, &mut ui.notes, screen != SCREEN_GAMEPLAY);
         }
         for (owner, id) in &pending.closed {
             ui.windows.retain(|w| !(&w.owner == owner && &w.window.id == id));
@@ -467,7 +467,7 @@ fn add_note(notes: &mut Vec<(String, Instant)>, text: String) {
 
 /// Messages of mods as toasts: at the top while playing; over menus (`over_menu`) at the
 /// bottom, above the game's key hints, where they cover no page title.
-unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)], over_menu: bool) {
+unsafe fn draw_notes(d: &mut Draw, notes: &mut Vec<(String, Instant)>, over_menu: bool) {
     if notes.is_empty() {
         return;
     }
@@ -485,6 +485,7 @@ unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)], over_menu: bool)
         api.set_alignment(&column, 0x0102);
         api.set_padding(&column, [0.0, 160.0, 0.0, 0.0]);
     }
+    let mut dismissed = None;
     for (i, (text, _)) in notes.iter().enumerate() {
         // as wide as the text (title glyphs are about 11.5 units), centred in it
         let width = (text.chars().count() as f32 * 11.5 + 56.0).min(1400.0);
@@ -495,11 +496,18 @@ unsafe fn draw_notes(d: &mut Draw, notes: &[(String, Instant)], over_menu: bool)
         api.set_padding(&toast, [28.0, 9.0, 0.0, 0.0]);
         page::boxed(api, &mut toast, page::BOX_TOAST, Some(page::RIM));
         api.text(text, STYLE_TITLE);
+        // a click dismisses it (only with a cursor: while playing a click is an attack)
+        if over_menu && crate::native::mouse_click_in(api.rect(&toast)) {
+            dismissed = Some(i);
+        }
         api.close_frame(&mut toast);
     }
     api.close_frame(&mut column);
     api.close_frame(&mut root_frame);
     api.end_layer(&mut layer);
+    if let Some(i) = dismissed {
+        notes.remove(i);
+    }
 }
 
 static HUD_POSITIONS: Mutex<Option<serde_json::Map<String, Value>>> = Mutex::new(None);

@@ -152,7 +152,7 @@ Windows are trees of nodes (`link/src/ui.rs`), drawn with the game's widgets:
 | `row` | children side by side | – |
 | `button` | framed button, lit under the cursor | `click` |
 | `toggle` | ON / OFF switch and label | `change {value}` |
-| `list` | clickable rows | `click {index}` |
+| `list` | clickable rows; tab-separated cells line up in columns (addon 0.6+) | `click {index}` |
 | `item_grid` | real inventory slots (icon, rarity) with the game's item tooltip | `click {index}` |
 | `text_input` | framed field; click to type (keyboard is kept from the game) | `change {value}` on every edit (addon 0.6+), `submit {value}` on Enter |
 
@@ -167,7 +167,8 @@ while playing, `shroudlink_keys.json` `{"mods": "K"}` changes it): mod entries w
 ON/OFF switch on the left, the selected mod's windows on the right. A window may be longer
 than the page: the page scrolls (mouse wheel, scroll bar), and only the parts in view are
 drawn. Notifications (`notify`) show as framed messages for 8 s, at most 3 at a time (a
-repeat counts up, "(×2)"): at the top while playing, at the bottom over menus.
+repeat counts up, "(×2)"): at the top while playing, at the bottom over menus, where a
+click dismisses one.
 
 ## Built-in client features
 - **Slot building blocks** (above): keys, marks, storage (`shroudlink_store.json` next to the

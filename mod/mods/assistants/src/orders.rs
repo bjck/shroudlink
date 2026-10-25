@@ -107,6 +107,8 @@ pub struct Orders {
     pub jobs: Vec<Job>,
     /// survivors whose home point was moved to their work, with the one to give back
     pub homes: Vec<Moved>,
+    /// workshops whose work is not announced (switched off in their window)
+    pub muted: Vec<u32>,
     next_id: u32,
     path: Option<PathBuf>,
 }
@@ -136,6 +138,7 @@ impl Orders {
                                 .collect()
                         })
                         .unwrap_or_default();
+                    orders.muted = v["muted"].as_array().map(|a| a.iter().filter_map(|m| m.as_u64().map(|m| m as u32)).collect()).unwrap_or_default();
                     orders.homes = v["homes"]
                         .as_array()
                         .map(|a| {
@@ -218,7 +221,7 @@ impl Orders {
             .iter()
             .map(|m| json!({ "workshop": m.workshop, "pos": m.original.pos, "override": m.original.override_range, "range": m.original.range, "site": m.site }))
             .collect();
-        let text = json!({ "next_id": self.next_id, "orders": self.list.iter().map(Order::to_json).collect::<Vec<_>>(), "jobs": jobs, "homes": homes }).to_string();
+        let text = json!({ "next_id": self.next_id, "orders": self.list.iter().map(Order::to_json).collect::<Vec<_>>(), "jobs": jobs, "homes": homes, "muted": self.muted }).to_string();
         let new = path.with_extension("json.new");
         if let Err(e) = std::fs::write(&new, text).and_then(|_| std::fs::rename(&new, path)) {
             log!("assistants: could not save {}: {e}", path.display());

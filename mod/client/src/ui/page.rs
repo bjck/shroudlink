@@ -143,7 +143,7 @@ unsafe fn tinted_button(d: &mut super::Draw, key: &UiStr, label: &str, width: f3
 }
 
 /// A row panel with left-aligned text, for lists; true when clicked.
-unsafe fn list_row(d: &mut super::Draw, key: &UiStr, text: &str, width: f32) -> bool {
+unsafe fn list_row(d: &mut super::Draw, key: &UiStr, text: &str, width: f32, columns: &[f32]) -> bool {
     let api = d.api;
     let mut f = Frame::new();
     api.open_row(&mut f, key, 0.0);
@@ -152,9 +152,38 @@ unsafe fn list_row(d: &mut super::Draw, key: &UiStr, text: &str, width: f32) -> 
     let rect = api.rect(&f);
     // a faint band that lights up under the cursor: clickable, but still a list
     boxed(api, &mut f, if mouse_in(rect) { ROW_HOVER } else { ROW }, None);
-    api.text(&super::fit_end(text, width - 40.0), STYLE_TAB_TEXT);
+    // tab-separated cells line up in columns as wide as their widest cell
+    let cells: Vec<&str> = text.split('\t').collect();
+    for (c, cell) in cells.iter().enumerate() {
+        match columns.get(c).filter(|_| c + 1 < cells.len()) {
+            Some(&w) => {
+                let mut cell_frame = Frame::new();
+                api.open_column(&mut cell_frame, &UiStr::keyed("shroudlinkPageListCell", key.id() ^ c as u64), 0.0);
+                api.set_size(&cell_frame, w, TEXT_H);
+                api.text(cell, STYLE_TAB_TEXT);
+                api.close_frame(&mut cell_frame);
+            }
+            None => api.text(&super::fit_end(cell, width - 40.0 - columns.iter().take(c).sum::<f32>()), STYLE_TAB_TEXT),
+        }
+    }
     api.close_frame(&mut f);
     mouse_click_in(rect)
+}
+
+/// Widths of the tab-separated columns of a list (all but the last), from its widest cells.
+fn list_columns(entries: &[String]) -> Vec<f32> {
+    let mut widths: Vec<f32> = Vec::new();
+    for entry in entries {
+        let cells: Vec<&str> = entry.split('\t').collect();
+        for (c, cell) in cells.iter().enumerate().take(cells.len().saturating_sub(1)) {
+            let w = cell.chars().count() as f32 * GLYPH + 2.0 * BUTTON_PAD;
+            match widths.get_mut(c) {
+                Some(x) => *x = x.max(w),
+                None => widths.push(w),
+            }
+        }
+    }
+    widths
 }
 
 /// The gold divider, `width` wide.
@@ -275,8 +304,9 @@ unsafe fn draw_pieces(d: &mut super::Draw, owner: &str, window: &str, title: &st
                 }
             }
             Node::List { id, entries } => {
+                let columns = list_columns(entries);
                 for (i, entry) in entries.iter().enumerate() {
-                    if view.take(LIST_ROW - 4.0) && list_row(d, &key("shroudlinkPageListRow", &format!("{scope}/{id}"), i as u64), entry, width) {
+                    if view.take(LIST_ROW - 4.0) && list_row(d, &key("shroudlinkPageListRow", &format!("{scope}/{id}"), i as u64), entry, width, &columns) {
                         events.push((owner.to_owned(), UiEvent { window: window.to_owned(), node: id.clone(), event: Event::Click { index: Some(i as u32) } }));
                     }
                 }
@@ -409,6 +439,14 @@ mod tests {
         assert_eq!(lines, vec!["one two", "three", "four five", "six"]);
         assert_eq!(wrap("", 100.0), vec![""]);
         assert_eq!(wrap("abcdefghijklmnopqrstuvwxyz", GLYPH * 10.0), vec!["abcdefghij", "klmnopqrst", "uvwxyz"]);
+    }
+
+    #[test]
+    fn tab_separated_list_cells_get_columns_as_wide_as_the_widest() {
+        let entries = vec!["Farmer\t1 open order".to_string(), "Ancient researcher\t0".to_string(), "no tabs".to_string()];
+        let w = list_columns(&entries);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0], 18.0 * GLYPH + 2.0 * BUTTON_PAD);
     }
 
     #[test]

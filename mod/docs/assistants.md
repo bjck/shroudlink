@@ -99,7 +99,8 @@ survives restarts (`shroudlink_assistants.json`, written as `.new` and renamed).
 
 Switched on per survivor in their window (a toggle), kept in the order file until switched
 off, run while the base is loaded (`src/jobs.rs`). Harvests and catches are announced
-together, at most one notification a minute.
+together, at most one notification a minute; each survivor's window has a switch for the
+notifications about their work (finished orders, sub-orders, harvests, catches).
 
 - **Gardener** (the Farmer and the Farmer's assistant), every 10 seconds (plants that
   refill grow one item at a time): empties into the chests within 40 m

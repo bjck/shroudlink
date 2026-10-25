@@ -81,8 +81,8 @@ pub struct Assistants {
     dice: Option<fishing::Dice>,
     ticks: u32,
     views: HashMap<u64, View>,
-    /// harvests and catches not announced yet: (who, what they did, items)
-    news: Vec<(String, Kind, Vec<(u32, u32)>)>,
+    /// harvests and catches not announced yet: (workshop, who, what they did, items)
+    news: Vec<(u32, String, Kind, Vec<(u32, u32)>)>,
     /// the tick of the last such notification
     news_sent: u32,
 }
@@ -187,13 +187,22 @@ impl Assistants {
                     content.push(Node::Text { text: "No survivor or assistant is near you. Stand at your base, close to the one who should work.".into() });
                 } else {
                     content.push(Node::Text { text: "Who should work? They run their stations nearby with what is in the chests around them.".into() });
-                    let entries = view.survivors.iter().map(|&(_, id)| format!("{} ({} open orders)", npc_name(id), self.orders.of(id).filter(|o| !o.done()).count())).collect();
+                    // name and orders in two columns (a tab: the addon lines them up)
+                    let entries = view
+                        .survivors
+                        .iter()
+                        .map(|&(_, id)| match self.orders.of(id).filter(|o| !o.done()).count() {
+                            1 => format!("{}\t1 open order", npc_name(id)),
+                            n => format!("{}\t{n} open orders", npc_name(id)),
+                        })
+                        .collect();
                     content.push(Node::List { id: "survivors".into(), entries });
                 }
                 ("Assistants".to_string(), "main")
             }
             (Some((entity, npc_id)), Some(_)) => {
                 let t = table();
+                content.push(Node::Toggle { id: "notify".into(), label: "Notifications about their work".into(), value: !self.orders.muted.contains(&npc_id) });
                 for kind in jobs::kinds_for(npc_id) {
                     let job = self.orders.jobs.iter().find(|j| j.npc == npc_id && j.kind == kind);
                     content.push(Node::Toggle { id: kind.name().into(), label: job_label(kind).into(), value: job.is_some() });
@@ -370,6 +379,7 @@ impl Assistants {
         let mut at_work: Vec<(u32, [f32; 3])> = Vec::new();
         let mut changed = false;
         let mut finished = Vec::new();
+        let muted = self.orders.muted.clone();
         let mut subs: Vec<(u32, chain::SubOrder, String)> = Vec::new();
         let open: Vec<(u32, u32)> = self.orders.list.iter().filter(|o| !o.done()).filter_map(|o| Some((o.parent?, o.product))).collect();
         let present: Vec<u32> = at.keys().copied().collect();
@@ -411,7 +421,9 @@ impl Assistants {
             if (order.produced, order.status.clone()) != before {
                 changed = true;
                 if order.status == Status::Done {
-                    finished.push(format!("{} finished {} {}.", npc_name(order.npc), order.produced, names::item(order.product)));
+                    if !muted.contains(&order.npc) {
+                        finished.push(format!("{} finished {} {}.", npc_name(order.npc), order.produced, names::item(order.product)));
+                    }
                     log!("assistants: order {} done, {} {} made", order.id, order.produced, names::item(order.product));
                 }
             }
@@ -419,7 +431,9 @@ impl Assistants {
         for (parent, sub, by) in subs {
             let id = self.orders.add_for(sub.workshop, sub.product, sub.recipe, sub.amount, &by, Some(parent));
             log!("assistants: order {parent} needs {} {} first: order {id} at {}", sub.amount, names::item(sub.product), npc_name(sub.workshop));
-            finished.push(format!("{} first makes {} {} for an order.", npc_name(sub.workshop), sub.amount, names::item(sub.product)));
+            if !muted.contains(&sub.workshop) {
+                finished.push(format!("{} first makes {} {} for an order.", npc_name(sub.workshop), sub.amount, names::item(sub.product)));
+            }
             changed = true;
         }
         // a finished order no longer needs what its sub-orders still make
@@ -456,18 +470,18 @@ impl Assistants {
                 },
             }
             changed |= (job.done, job.status.clone()) != before;
-            if !job.news.is_empty() {
+            if !job.news.is_empty() && !muted.contains(&job.npc) {
                 let who = people.get(&job.npc).map_or_else(|| npc_name(job.npc), |npcs| worker_name(&base, job.npc, npcs));
-                match self.news.iter_mut().find(|n| n.0 == who && n.1 == job.kind) {
+                match self.news.iter_mut().find(|n| n.1 == who && n.2 == job.kind) {
                     Some(n) => {
                         for &(item, count) in &job.news {
-                            match n.2.iter_mut().find(|i| i.0 == item) {
+                            match n.3.iter_mut().find(|i| i.0 == item) {
                                 Some(i) => i.1 += count,
-                                None => n.2.push((item, count)),
+                                None => n.3.push((item, count)),
                             }
                         }
                     }
-                    None => self.news.push((who, job.kind, job.news.clone())),
+                    None => self.news.push((job.npc, who, job.kind, job.news.clone())),
                 }
             }
         }
@@ -496,7 +510,8 @@ impl Assistants {
         }
         if !self.news.is_empty() && self.ticks.wrapping_sub(self.news_sent) >= NEWS_EVERY {
             self.news_sent = self.ticks;
-            for (who, kind, items) in self.news.drain(..) {
+            // switched off meanwhile: what was collected goes unannounced too
+            for (_, who, kind, items) in self.news.drain(..).filter(|n| !muted.contains(&n.0)) {
                 finished.push(match kind {
                     Kind::Harvest => format!("{who} harvested {}.", item_list(&items)),
                     Kind::Fish => format!("{who} caught {}.", item_list(&items)),
@@ -555,6 +570,15 @@ impl Mod for Assistants {
                     self.orders.save();
                     log!("assistants: the fisher fishes at {spot:?}");
                     self.views.entry(client).or_default().message = Some("The fisher will fish here.".into());
+                }
+            }
+            ("notify", Event::Change { value }) => {
+                if let Some((_, npc)) = view.npc {
+                    self.orders.muted.retain(|&m| m != npc);
+                    if value.as_bool() == Some(false) {
+                        self.orders.muted.push(npc);
+                    }
+                    self.orders.save();
                 }
             }
             (name @ ("harvest" | "fish"), Event::Change { value }) => {
@@ -671,6 +695,21 @@ mod tests {
         m.views.get_mut(&1).unwrap().listed = vec![open, done];
         click(&mut m, &mut host, "orders", Event::Click { index: Some(1) });
         assert_eq!(m.orders.list.iter().map(|o| o.id).collect::<Vec<_>>(), vec![open]);
+    }
+
+    #[test]
+    fn notifications_switch_off_per_survivor() {
+        let mut m = Assistants::default();
+        let mut host = MockHost::default();
+        m.on_join(&mut host.host(), 1);
+        m.views.get_mut(&1).unwrap().npc = Some((50, 9));
+        let switch = |m: &mut Assistants, host: &mut MockHost, on: bool| {
+            m.on_message(&mut host.host(), 1, &UiEvent { window: "npc".into(), node: "notify".into(), event: Event::Change { value: Value::Bool(on) } }.to_message(ID));
+        };
+        switch(&mut m, &mut host, false);
+        assert_eq!(m.orders.muted, vec![9]);
+        switch(&mut m, &mut host, true);
+        assert!(m.orders.muted.is_empty());
     }
 
     #[test]
