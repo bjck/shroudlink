@@ -172,5 +172,6 @@ Not verified: whether a stopped run refunds its inputs on cancel.
   block for the crafting panel).
 - Working at the very station that makes the order (the game picks one of theirs), and a
   fishing animation for the fisher (findings in `docs/research/assistants.md`).
-- The crops that end in scatter loot (beans and ten more), which the gardener cannot
-  harvest yet.
+- Cattails and papyrus: both end in the same ripe stage, so it cannot tell which seedling
+  replants it; they stay for the players. Crops whose ripe stage is scatter loot (beans,
+  pumpkins, thyme …) are in the table since Oct 2026, not yet seen harvested in game.

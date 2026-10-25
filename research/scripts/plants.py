@@ -28,9 +28,17 @@ def main():
     for root, levels in sorted(stages.items(), key=lambda x: names[x[0]]):
         level, stage, inventory = max(levels)
         others = {inv for lv, _, inv in levels if lv != level}
-        # the ripe stage has a harvest of its own, unlike the seedling stages
-        if root in seed_of and inventory and inventory not in others and "harvest" in stage.lower():
+        # the ripe stage has a harvest of its own, unlike the seedling stages; some ripe
+        # stages are scatter loot (beans: Scatter_Loot_…_Bean): the gardener only takes
+        # those standing on a plant root, so wild scatter loot is never mistaken for a crop
+        if root in seed_of and inventory and inventory not in others:
             rows.append(f"crop\t{inventory}\t{seed_of[root]}\t{names[root]}\t{len(levels)}")
+    # a ripe stage two plants share (cattails and papyrus) cannot tell which seedling it
+    # needs: those stay for the players
+    count = defaultdict(int)
+    for row in rows:
+        count[row.split("\t")[1]] += 1
+    rows = [row for row in rows if count[row.split("\t")[1]] == 1]
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(rows) + "\n")
     print(f"{len(rows)} crops")

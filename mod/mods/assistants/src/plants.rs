@@ -39,6 +39,6 @@ mod tests {
         let corn = &crops()["304ab9b0-dbe8-451e-8eb0-8f238c286cf5"];
         assert_eq!(corn.name, "T1_Plant_Growth_Corn");
         assert_eq!(crate::names::item(corn.seedling), "Seedling Grain Corn");
-        assert_eq!(crops().len(), 27);
+        assert_eq!(crops().len(), 36);
     }
 }

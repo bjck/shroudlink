@@ -2,6 +2,7 @@ crop	711ab8e1-2101-40d5-bb9f-727b6711725a	1174705547	T1_Plant_Growth_BerryBushes
 crop	304ab9b0-dbe8-451e-8eb0-8f238c286cf5	3660770821	T1_Plant_Growth_Corn	3
 crop	87512047-0e21-4616-bbde-1a6e617d65d5	751481953	T1_Plant_Growth_Mushrooms_Red	3
 crop	925375d4-04ba-450d-821a-44581c3dd7bb	4047385314	T1_Plant_Growth_PlantFibre_Shrub	4
+crop	cb6182e4-ee58-42b3-9bb5-d19b714a3988	2229826461	T1_Plant_Growth_Reed	5
 crop	9668b921-adf5-406b-9004-463288540dbc	2762446918	T1_Plant_Growth_St_Johns_Worth	3
 crop	a745e1d8-9e93-43aa-b49f-ba2f3d4a09d0	1438935166	T1_Plant_Growth_Tomato	3
 crop	1c749952-a99c-4f62-9ba7-febdf4571f72	3776129035	T2_Plant_Growth_AzureRussula_GlowShroom	4
@@ -19,9 +20,17 @@ crop	faa21dd8-0313-4fe7-841e-471ab69594ee	1811689543	T3_Plant_Growth_Wheat	3
 crop	e3f79d46-b927-429c-8528-79d0e17f5ffc	2024314426	T4_Plant_Growth_Desert_flower	3
 crop	6bc9d1b2-182c-408e-9aea-fdcbaddeef64	1898312963	T4_Plant_Growth_DevilsClaw	3
 crop	e3116db3-f257-4204-a77d-987353aeb916	1419248088	T4_Plant_Growth_Saffron	3
+crop	cd7520de-4c11-43f6-be0c-73ef52da583c	3622239347	T5_Plant_Growth_ColdHeights_Pumpkin	5
 crop	3d1262d2-3616-4e8b-951a-62c0d495a002	1401264358	T5_Plant_Growth_Tentacle_ShroudAdhesive	2
 crop	dfa9523d-dd9e-41ec-b834-b437c6c3bc5b	3014637412	T5_Plant_Growth_Wolfsbane	3
 crop	5e892fee-107b-4813-9a7a-ff2592918449	961655092	T5_Plant_Growth_Yellow_Gentian	3
+crop	b69b9bd2-5d11-4e7b-b0ba-616db3f9b37e	1783208373	T5_Plant_YellowFogMushroom	4
+crop	25c3d55c-c3e6-4a34-a0b5-9ea63535483e	2411338569	T6_Plant_Growth_Algae	5
+crop	f679bc97-07cd-4668-a944-94bc199d19e1	1291967765	T6_Plant_Growth_Daylily	5
 crop	ef461dd8-4de9-4a25-97b7-8516645ccff1	2601152870	T6_Plant_Growth_Ginger	4
 crop	7174e65c-060a-4cdf-bf6f-df00cebe1c8d	3520367051	T6_Plant_Growth_Rice	3
+crop	240d4540-9393-46df-8728-8425be75e389	420003849	T6_Plant_Growth_Shiitake	5
 crop	bd20bb16-9b0f-49c6-982e-052ccb9071c7	3196395822	T6_Plant_Growth_Taro	5
+crop	18280ed9-7665-445f-ae97-8dadd3d820bb	2816539508	T7_Plant_Growth_Bean	5
+crop	c882e43a-fa24-4dc2-95c9-ea7779acf4db	3166342350	T7_Plant_Growth_Pomegranate	5
+crop	1cfeb4ea-321d-4399-bd00-55d740ac00cc	3415410466	T7_Plant_Growth_Thyme	5
