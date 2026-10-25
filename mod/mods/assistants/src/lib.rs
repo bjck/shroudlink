@@ -70,10 +70,15 @@ struct View {
     page: usize,
     /// the baits the fisher's window lists, in its order
     baits: Vec<u32>,
+    /// the seedlings of the crops the Crops tab lists, in its order
+    crops: Vec<u32>,
     /// the tab shown, and the tabs offered (for their click indices)
     tab: Tab,
     tabs: Vec<Tab>,
 }
+
+/// Who the gardener's seedling orders are by.
+const GARDENER: &str = "the gardener";
 
 /// Amounts the quick buttons order.
 const QUICK: [u32; 4] = [1, 5, 10, 20];
@@ -208,8 +213,9 @@ fn stock_near(base: &dyn Base, entity: u32) -> HashMap<u32, u32> {
 }
 
 /// The Crops tab: per kind of crop around the gardener, how many are ripe (or picked and
-/// waiting for a seedling), the seedlings in the chests and how many they keep.
-fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
+/// waiting for a seedling), the seedlings in the chests and how many they keep. Also the
+/// seedlings of the listed crops, in their order (for clicks).
+fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> (Vec<Node>, Vec<u32>) {
     let mut nodes = Vec::new();
     let stock = stock_near(base, entity);
     // seedling -> (growing, ripe, picked and waiting)
@@ -236,10 +242,12 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
     nodes.push(Node::Text { text: "What grows around them. Ripe crops are picked when a seedling is there to replant them.".into() });
     if kinds.is_empty() {
         nodes.push(Node::Text { text: "No crops around them right now.".into() });
-        return nodes;
+        return (nodes, Vec::new());
     }
+    nodes.push(Node::Text { text: "Click a crop to stop it: no more seedlings are made for it, and once the chests have none left, it is harvested and its soil left empty. Click it again to resume.".into() });
     kinds.sort_by_key(|k| names::item(k.0));
     let keep = |seedling: u32| job.and_then(|j| j.peaks.iter().find(|p| p.0 == seedling)).map(|p| p.1 + jobs::SEEDLING_RESERVE);
+    let stopped = |seedling: u32| job.is_some_and(|j| j.stopped.contains(&seedling));
     let entries = kinds
         .iter()
         .map(|&(seedling, growing, ripe, waiting)| {
@@ -257,6 +265,7 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
             let state = if parts.is_empty() { "none planted".to_string() } else { parts.join(", ") };
             let have = stock.get(&seedling).copied().unwrap_or(0);
             let seedlings = match keep(seedling) {
+                _ if stopped(seedling) => format!("{have} seedlings (stopped)"),
                 Some(k) => format!("{have} seedlings (keeps {k})"),
                 None => format!("{have} seedlings"),
             };
@@ -264,7 +273,7 @@ fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
         })
         .collect();
     nodes.push(Node::List { id: "crops".into(), entries });
-    nodes
+    (nodes, kinds.iter().map(|k| k.0).collect())
 }
 
 /// The Orders tab: their stations, the products, ordering, the orders.
@@ -401,7 +410,9 @@ impl Assistants {
                     }
                     Tab::Crops => {
                         let job = self.orders.jobs.iter().find(|j| j.npc == npc_id && j.kind == Kind::Harvest);
-                        content.extend(crops_tab(&base, entity, job));
+                        let (nodes, crops) = crops_tab(&base, entity, job);
+                        content.extend(nodes);
+                        view.crops = crops;
                     }
                     Tab::Notifications => {
                         content.push(Node::Toggle { id: "notify".into(), label: "Notifications about their work".into(), value: !self.orders.muted.contains(&npc_id) });
@@ -466,17 +477,47 @@ impl Assistants {
             self.orders.save();
             return Some(format!("Cleared: {} {}.", order.amount, names::item(order.product)));
         }
+        let order = self.drop_order(&base, entity, pos);
+        self.orders.save();
+        Some(format!("Cancelled: {} {} ({} made).", order.amount, names::item(order.product), order.produced))
+    }
+
+    /// Removes an open order and its sub-orders, giving their stations back.
+    fn drop_order(&mut self, base: &WorldBase, entity: u32, pos: usize) -> Order {
         let mut order = self.orders.list.remove(pos);
-        work::release(table(), &mut order, entity, &base, true);
+        work::release(table(), &mut order, entity, base, true);
         for child in self.orders.children(order.id) {
             if let Some(p) = self.orders.list.iter().position(|o| o.id == child) {
                 let mut sub = self.orders.list.remove(p);
-                work::release(table(), &mut sub, entity, &base, true);
+                work::release(table(), &mut sub, entity, base, true);
             }
         }
-        self.orders.save();
         log!("assistants: order {} ({} {}) cancelled, {} made", order.id, order.amount, names::item(order.product), order.produced);
-        Some(format!("Cancelled: {} {} ({} made).", order.amount, names::item(order.product), order.produced))
+        order
+    }
+
+    /// Stops (or resumes) a crop of the gardener whose Crops tab is open: a stopped one
+    /// gets no more seedlings, and the gardener's open order for them is cancelled.
+    fn stop_crop(&mut self, host: &Host, client: u64, index: usize) -> Option<String> {
+        let base = WorldBase { world: host.world() };
+        let view = self.views.get(&client)?;
+        let (entity, npc) = view.npc?;
+        let seedling = *view.crops.get(index)?;
+        let job = self.orders.jobs.iter_mut().find(|j| j.npc == npc && j.kind == Kind::Harvest)?;
+        let crop = names::item(seedling).trim_start_matches("Seedling ").to_string();
+        let text = if job.stopped.contains(&seedling) {
+            job.stopped.retain(|&s| s != seedling);
+            format!("{crop} resumed: seedlings are made for it again.")
+        } else {
+            job.stopped.push(seedling);
+            while let Some(pos) = self.orders.list.iter().position(|o| !o.done() && o.npc == npc && o.product == seedling && o.by == GARDENER) {
+                self.drop_order(&base, entity, pos);
+            }
+            format!("{crop} stopped: no more seedlings; once none are left, it is harvested and its soil left empty.")
+        };
+        self.orders.save();
+        log!("assistants: {} {}", npc_name(npc), text);
+        Some(text)
     }
 
     /// Switches a standing job on or off.
@@ -636,7 +677,7 @@ impl Assistants {
             let Some(&entity) = at.get(&job.npc) else { continue };
             let chests = base.chests_near(entity, work::RADIUS);
             let stock = |item: u32| chests.iter().flat_map(|&c| base.slots(c)).filter(|s| s.item == item).map(|s| s.count).sum::<u32>();
-            for (seedling, amount) in jobs::seedlings_short(&job.peaks, stock) {
+            for (seedling, amount) in jobs::seedlings_short(&job.peaks, stock).into_iter().filter(|(s, _)| !job.stopped.contains(s)) {
                 let ordered = self.orders.list.iter().any(|o| !o.done() && o.product == seedling);
                 if let (false, Some(recipe)) = (ordered, recipe_for(&base, entity, job.npc, seedling)) {
                     seed_orders.push((job.npc, seedling, recipe.id, amount));
@@ -644,7 +685,7 @@ impl Assistants {
             }
         }
         for (npc, seedling, recipe, amount) in seed_orders {
-            let id = self.orders.add(npc, seedling, recipe, amount, "the gardener");
+            let id = self.orders.add(npc, seedling, recipe, amount, GARDENER);
             log!("assistants: order {id}: the gardener restocks {amount} {}", names::item(seedling));
             if !muted.contains(&npc) {
                 finished.push(format!("{} sows {amount} {} for the fields.", npc_name(npc), names::item(seedling)));
@@ -753,6 +794,11 @@ impl Mod for Assistants {
                         self.orders.save();
                         log!("assistants: {} uses {} first", npc_name(npc), names::item(bait));
                     }
+                }
+            }
+            ("crops", Event::Click { index: Some(i) }) => {
+                if let Some(text) = self.stop_crop(host, client, i as usize) {
+                    self.tell(host, client, text);
                 }
             }
             ("notify", Event::Change { value }) => {

@@ -135,6 +135,7 @@ impl Orders {
                                     job.peaks = serde_json::from_value(j["peaks"].clone()).unwrap_or_default();
                                     job.spot = point(&j["spot"]);
                                     job.baits = serde_json::from_value(j["baits"].clone()).unwrap_or_default();
+                                    job.stopped = serde_json::from_value(j["stopped"].clone()).unwrap_or_default();
                                     Some(job)
                                 })
                                 .collect()
@@ -217,7 +218,7 @@ impl Orders {
             self.list.retain(|o| !drop.contains(&o.id));
         }
         let Some(path) = &self.path else { return };
-        let jobs: Vec<Value> = self.jobs.iter().map(|j| json!({ "npc": j.npc, "kind": j.kind.name(), "done": j.done, "replanted": j.replanted, "spot": j.spot, "peaks": j.peaks, "baits": j.baits })).collect();
+        let jobs: Vec<Value> = self.jobs.iter().map(|j| json!({ "npc": j.npc, "kind": j.kind.name(), "done": j.done, "replanted": j.replanted, "spot": j.spot, "peaks": j.peaks, "baits": j.baits, "stopped": j.stopped })).collect();
         let homes: Vec<Value> = self
             .homes
             .iter()

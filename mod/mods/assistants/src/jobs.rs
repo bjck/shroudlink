@@ -91,6 +91,9 @@ pub struct Job {
     pub peaks: Vec<(u32, u32)>,
     /// the baits the fisher uses first, in this order (set in the window); the others after
     pub baits: Vec<u32>,
+    /// seedlings the players stopped (Crops tab): none are made for the fields any more,
+    /// and once the chests have none, the crop is harvested and its soil left empty
+    pub stopped: Vec<u32>,
 }
 
 /// Every bait, in the order the fisher uses them: `preferred` first, then the others by
@@ -131,7 +134,7 @@ impl Job {
 
 impl Job {
     pub fn new(npc: u32, kind: Kind) -> Job {
-        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new(), peaks: Vec::new(), baits: Vec::new() }
+        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new(), peaks: Vec::new(), baits: Vec::new(), stopped: Vec::new() }
     }
 }
 
@@ -150,6 +153,7 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
     };
     let mut harvested = Vec::new();
     let mut crops_harvested = Vec::new();
+    let stopped = job.stopped.clone();
     for (plant, kind) in base.harvestables_near(gardener, RADIUS) {
         let mut from_plant = 0;
         // a crop is picked only when it can be replanted: without a seedling it stays ripe
@@ -157,7 +161,8 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
         if kind == Harvest::Crop {
             if let Some(seedling) = base.crop_seedling(plant) {
                 let have = chests.iter().any(|&c| base.slots(c).iter().any(|s| s.item == seedling && s.count != 0));
-                if !have {
+                // a stopped crop is picked all the same: its field is being given up
+                if !have && !stopped.contains(&seedling) {
                     want(seedling);
                     no_seedling = Some(seedling);
                     continue;
@@ -214,9 +219,9 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
             }
             // no seedling, or a crop the table does not know: done, the soil stays empty
             Err(missing) if missing.is_some() || base.crop_seedling(plant).is_none() => {
-                if let Some(seedling) = missing {
+                if let Some(seedling) = missing.filter(|s| !stopped.contains(s)) {
                     want(seedling);
-                    no_seedling = missing;
+                    no_seedling = Some(seedling);
                 }
                 if base.finish_crop(plant) {
                     log!("assistants: crop {plant} harvested, not replanted");
@@ -228,7 +233,7 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
         }
     }
     job.done += moved;
-    for (seedling, n) in round {
+    for (seedling, n) in round.into_iter().filter(|r| !stopped.contains(&r.0)) {
         match job.peaks.iter_mut().find(|p| p.0 == seedling) {
             Some(p) => p.1 = p.1.max(n),
             None => job.peaks.push((seedling, n)),
@@ -621,6 +626,37 @@ mod tests {
         assert_eq!((base.count(CROP, 500), base.count(CHEST, 500)), (3, 0), "not picked");
         assert_eq!(job.peaks, vec![(SEEDLING, 1)], "the seedling it waits for is restocked");
         assert!(job.status.contains("wait for"), "{}", job.status);
+    }
+
+    #[test]
+    fn a_stopped_crop_is_picked_and_its_soil_left_empty() {
+        let mut base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[]);
+        base.chest(CROP, 8, &[(500, 3)]);
+        base.harvest = vec![(CROP, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        let mut job = Job::new(7, Kind::Harvest);
+        job.peaks = vec![(SEEDLING, 4)];
+        job.stopped = vec![SEEDLING];
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!(base.count(CHEST, 500), 3, "picked");
+        assert_eq!(*base.finished.borrow(), vec![CROP], "not replanted");
+        assert_eq!(job.peaks, vec![(SEEDLING, 4)], "no bigger stock for it");
+        assert!(!job.status.contains("wait for"), "{}", job.status);
+    }
+
+    #[test]
+    fn a_stopped_crop_is_still_replanted_while_seedlings_are_left() {
+        let mut base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[(SEEDLING, 1)]);
+        base.chest(CROP, 8, &[(500, 3)]);
+        base.harvest = vec![(CROP, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        let mut job = Job::new(7, Kind::Harvest);
+        job.stopped = vec![SEEDLING];
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!((base.replanted.borrow().clone(), base.count(CHEST, SEEDLING)), (vec![CROP], 0));
+        assert!(job.peaks.is_empty());
     }
 
     const SIMPLE_BAIT: u32 = 3151503945;
