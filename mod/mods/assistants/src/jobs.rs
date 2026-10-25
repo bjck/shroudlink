@@ -81,6 +81,19 @@ pub struct Job {
     /// the most crops of a kind replanted (or left without a seedling) in one round:
     /// (seedling, count), about the size of that field; the seedling stock is kept above it
     pub peaks: Vec<(u32, u32)>,
+    /// the baits the fisher uses first, in this order (set in the window); the others after
+    pub baits: Vec<u32>,
+}
+
+/// Every bait, in the order the fisher uses them: `preferred` first, then the others by
+/// name.
+pub fn bait_order(preferred: &[u32]) -> Vec<u32> {
+    let data = fishing::data();
+    let mut order: Vec<u32> = preferred.iter().copied().filter(|&b| data.is_bait(b)).collect();
+    let mut rest: Vec<u32> = data.baits.keys().copied().filter(|b| !order.contains(b)).collect();
+    rest.sort_by_key(|&b| (crate::names::item(b), b));
+    order.extend(rest);
+    order
 }
 
 /// Seedlings kept in the chests beyond a field's size.
@@ -110,7 +123,7 @@ impl Job {
 
 impl Job {
     pub fn new(npc: u32, kind: Kind) -> Job {
-        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new(), peaks: Vec::new() }
+        Job { npc, kind, done: 0, progress: 0, status: "waiting until someone is at the base".into(), replanted: 0, spot: None, site: None, news: Vec::new(), peaks: Vec::new(), baits: Vec::new() }
     }
 }
 
@@ -211,10 +224,10 @@ fn replant(base: &dyn Base, crop: u32, chests: &[u32]) -> Result<u32, Option<u32
     Err(None)
 }
 
-/// A bait in the chests: (chest, slot, bait item).
-fn find_bait(base: &dyn Base, chests: &[u32]) -> Option<(u32, u64, u32)> {
-    let data = fishing::data();
-    chests.iter().find_map(|&c| base.slots(c).into_iter().find(|s| s.count != 0 && data.is_bait(s.item)).map(|s| (c, s.id, s.item)))
+/// The first bait of the fisher's order that is in the chests: (chest, slot, bait item).
+fn find_bait(base: &dyn Base, chests: &[u32], preferred: &[u32]) -> Option<(u32, u64, u32)> {
+    let slots: Vec<(u32, shroudlink_sdk::Slot)> = chests.iter().flat_map(|&c| base.slots(c).into_iter().filter(|s| s.count != 0).map(move |s| (c, s))).collect();
+    bait_order(preferred).into_iter().find_map(|bait| slots.iter().find(|(_, s)| s.item == bait).map(|(c, s)| (*c, s.id, bait)))
 }
 
 /// Fishes for `seconds`; returns the fish caught.
@@ -230,7 +243,7 @@ pub fn fish(base: &dyn Base, fisher: u32, seconds: u32, job: &mut Job, dice: &mu
     let chests = base.chests_near(fisher, RADIUS);
     let mut caught = 0;
     while job.progress >= SECONDS_PER_CATCH {
-        let Some((chest, slot, bait)) = find_bait(base, &chests) else {
+        let Some((chest, slot, bait)) = find_bait(base, &chests, &job.baits) else {
             job.status = "no bait in the chests".into();
             job.progress = SECONDS_PER_CATCH;
             break;
@@ -305,6 +318,19 @@ mod tests {
         assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
         assert!(base.finished.borrow().is_empty(), "a replanted crop is not removed");
         assert_eq!((base.count(CHEST, SEEDLING), base.count(CHEST, 500), job.replanted), (1, 3, 1));
+    }
+
+    #[test]
+    fn the_fisher_takes_the_bait_of_his_order_first() {
+        let (worm, other) = (700318057, 1313427371);
+        let base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[(worm, 3), (other, 2)]);
+        let chests = [CHEST];
+        assert_eq!(find_bait(&base, &chests, &[]).map(|b| b.2), Some(bait_order(&[]).into_iter().find(|b| *b == worm || *b == other).unwrap()), "without an order: the first by name");
+        assert_eq!(find_bait(&base, &chests, &[other]).map(|b| b.2), Some(other));
+        assert_eq!(find_bait(&base, &chests, &[999, worm]).map(|b| b.2), Some(worm), "unknown items in the order are skipped");
+        let order = bait_order(&[other]);
+        assert_eq!((order[0], order.len()), (other, fishing::data().baits.len()));
     }
 
     #[test]

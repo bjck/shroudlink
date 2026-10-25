@@ -67,6 +67,8 @@ struct View {
     products: Vec<u32>,
     /// which page of products is shown
     page: usize,
+    /// the baits the fisher's window lists, in its order
+    baits: Vec<u32>,
 }
 
 /// Amounts the quick buttons order.
@@ -210,6 +212,19 @@ impl Assistants {
                         content.push(Node::Text { text: job_line(job) });
                         if kind == Kind::Fish {
                             content.push(Node::Button { id: "fish_here".into(), label: "Fish here (where you stand)".into() });
+                            // the baits in the order they are used, with what the chests hold
+                            let chests = base.chests_near(entity, work::RADIUS);
+                            let mut stock: HashMap<u32, u32> = HashMap::new();
+                            for slot in chests.iter().flat_map(|&c| base.slots(c)) {
+                                *stock.entry(slot.item).or_default() += slot.count;
+                            }
+                            let order = jobs::bait_order(&job.baits);
+                            // icons and the game's names in the tooltip; the number is the stock
+                            let items = order.iter().map(|&b| Item { id: b, count: stock.get(&b).copied().unwrap_or(0) }).collect();
+                            content.push(Node::Heading { text: "Bait order".into() });
+                            content.push(Node::Text { text: "They use the first of these baits that is in the chests, from left to right. Click a bait to use it first.".into() });
+                            content.push(Node::ItemGrid { id: "baits".into(), columns: 8, items });
+                            view.baits = order;
                         }
                     }
                 }
@@ -591,6 +606,17 @@ impl Mod for Assistants {
                     self.orders.save();
                     log!("assistants: the fisher fishes at {spot:?}");
                     self.views.entry(client).or_default().message = Some("The fisher will fish here.".into());
+                }
+            }
+            ("baits", Event::Click { index: Some(i) }) => {
+                let order = view.baits.clone();
+                if let (Some(&bait), Some((_, npc))) = (order.get(i as usize), view.npc) {
+                    if let Some(job) = self.orders.jobs.iter_mut().find(|j| j.npc == npc && j.kind == Kind::Fish) {
+                        // the clicked bait first, the rest in the order they had
+                        job.baits = std::iter::once(bait).chain(order.into_iter().filter(|&b| b != bait)).collect();
+                        self.orders.save();
+                        log!("assistants: {} uses {} first", npc_name(npc), names::item(bait));
+                    }
                 }
             }
             ("notify", Event::Change { value }) => {

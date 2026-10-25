@@ -119,7 +119,9 @@ notifications about their work (finished orders, sub-orders, harvests, catches).
   chests: when there are fewer, the Farmer orders the difference at a Seedbed nearby (an
   ordinary order, by "the gardener", one per seedling at a time).
 - **Fisher** (the Fisher): one catch a minute, at most 3 made up after a pause. Each catch
-  takes one bait from the chests, draws a fish from the spawn table of a fishing spot
+  takes one bait from the chests, the first of the **bait order** in their window (all
+  baits as item slots with the stock in the chests; a click moves one to the front; baits
+  not ranked come after, by name), draws a fish from the spawn table of a fishing spot
   within 60 m (`ecs::FishingSpot`) or the table players fish from anywhere, weighted by what
   the bait attracts (`baitItemSetup.fishBooster`), and **creates** the fish in a chest
   through the game's own function (core v7, `server/src/items.rs`). The bait goes first,
