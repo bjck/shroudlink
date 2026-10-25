@@ -170,6 +170,19 @@ From the reflection data (`server/.cache/types.json`) and the live component byt
   his forge. The state names in the binary are only the reflection table's; the AI code
   was not located.
 
+## Animal feeders and the build zone
+
+- A placed feeder is an `AnimalTarget` (live: `DynamicAnimalTarget`, 8 bytes, no type
+  mask) with an inventory; its kind comes from `UsedItem` (+0, the building item, e.g.
+  `Animal_Farm_Feeder_Goat`). The food is the item named for the animal
+  (`Material_T1_Goat_Feeding`), made by a Farmer workshop recipe (crafted at once, 50 a
+  batch; `recipes.txt` of `recipe_dump`).
+- The flame altar is the entity with `BaseIdComponent` (its `buildZoneSize` is 0 on the
+  server); its level is `NetworkLevel` (u16). The zone is a cube around it,
+  `BalancingTable.buildzoneSizesPerAltarLevel`: 0, 40, 80, 120, 160, 160 m
+  (`research/scripts/eml/base_dump`). `ClientBaseIdComponent` counts farm animals and
+  hungry ones (+0x28, +0x2c).
+
 ## Playing a sequence on an NPC (fishing animation, not done)
 
 - `ActorInput` (+0x8 `triggerContext`, +0x178 `triggerCallCounter`) stays all zeros on

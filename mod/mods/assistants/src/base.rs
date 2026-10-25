@@ -196,6 +196,9 @@ pub trait Base {
     /// (stations whose `ActiveNpcTarget.npcType` is theirs), the walk there and the
     /// station's interaction sequence. Which of their stations is the game's choice.
     fn work_at_station(&self, npc: u32) -> bool;
+    /// Animal feeders of the base an entity stands in (inside its build zone), else within
+    /// `radius` of it: (feeder, its building item, `ecs::UsedItem`).
+    fn feeders_near(&self, entity: u32, radius: f64) -> Vec<(u32, u32)>;
     /// The spawn table of the nearest fishing spot (`ecs::FishingSpot.spawnTable`, a Guid
     /// in text form), if one is around.
     fn fishing_spot_near(&self, entity: u32, radius: f64) -> Option<String>;
@@ -209,7 +212,24 @@ fn u32_at(data: &[u8], at: usize) -> u32 {
     data.get(at..at + 4).map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()))
 }
 
+/// Edge of a base's build zone (a cube around its flame altar) by the altar's level, in
+/// metres (`BalancingTable.buildzoneSizesPerAltarLevel`, `research/scripts/eml/base_dump`).
+const BUILD_ZONE: [f64; 6] = [0.0, 40.0, 80.0, 120.0, 160.0, 160.0];
+
 impl WorldBase<'_> {
+    /// The base an entity stands in: (flame altar, its position, half the zone's edge). An
+    /// altar is the entity with `ecs::BaseIdComponent`; its level is `NetworkLevel` (+0x0, u16).
+    fn base_zone(&self, entity: u32) -> Option<(u32, [f64; 3], f64)> {
+        let at = self.world.position(entity)?;
+        let farthest = BUILD_ZONE.iter().copied().fold(0.0, f64::max) / 2.0 * 1.75;
+        self.world.entities_near(entity, farthest, "BaseIdComponent").into_iter().find_map(|altar| {
+            let level = self.world.component(altar, "NetworkLevel").map_or(0, |l| u16::from_le_bytes([l[0], l[1]]) as usize);
+            let half = BUILD_ZONE.get(level).or(BUILD_ZONE.last()).copied()? / 2.0;
+            let center = self.world.position(altar)?;
+            ((0..3).all(|i| (at[i] - center[i]).abs() <= half) && half > 0.0).then_some((altar, center, half))
+        })
+    }
+
     /// The `Fuel` bytes, where its two values sit, and which of them is the amount.
     fn fuel_layout(&self, entity: u32) -> Option<(Vec<u8>, [usize; 2], usize)> {
         let f = self.world.component(entity, "Fuel")?;
@@ -278,7 +298,8 @@ impl Base for WorldBase<'_> {
 
     fn chests_near(&self, entity: u32, radius: f64) -> Vec<u32> {
         // stations, NPCs, animals, crops, loot plants and loot containers have inventories too
-        const NOT_STORAGE: [&str; 7] = ["FactoryStation", "NpcCommon", "ActiveNpcState", "DestroyOnLoot", "InteractionLootRefill", "Growth", "RandomLootContainer"];
+        // (animal feeders are `AnimalTarget`s: their food is not stock to take or fill)
+        const NOT_STORAGE: [&str; 8] = ["FactoryStation", "NpcCommon", "ActiveNpcState", "DestroyOnLoot", "InteractionLootRefill", "Growth", "RandomLootContainer", "AnimalTarget"];
         let not_storage = |e: u32| NOT_STORAGE.iter().any(|c| self.world.component(e, c).is_some());
         self.world.inventories_near(entity, radius).into_iter().filter(|&e| !not_storage(e)).collect()
     }
@@ -456,6 +477,21 @@ impl Base for WorldBase<'_> {
         d[2] = npc_decision::WANTS_TO_INTERACT;
         d[0] = npc_state::FIND_TARGET;
         self.world.set_component(npc, "ActiveNpcState", &d)
+    }
+
+    fn feeders_near(&self, entity: u32, radius: f64) -> Vec<(u32, u32)> {
+        let feeding = crate::feeding::data();
+        let feeder = |e: u32| {
+            let item = u32_at(&self.world.component(e, "UsedItem")?, 0);
+            feeding.food_of(item).map(|_| (e, item))
+        };
+        match self.base_zone(entity) {
+            Some((altar, center, half)) => {
+                let inside = |e: u32| self.world.position(e).is_some_and(|p| (0..3).all(|i| (p[i] - center[i]).abs() <= half));
+                self.world.entities_near(altar, half * 1.75, "AnimalTarget").into_iter().filter(|&e| inside(e)).filter_map(feeder).collect()
+            }
+            None => self.world.entities_near(entity, radius, "AnimalTarget").into_iter().filter_map(feeder).collect(),
+        }
     }
 
     fn fishing_spot_near(&self, entity: u32, radius: f64) -> Option<String> {

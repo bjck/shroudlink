@@ -15,6 +15,7 @@
 
 mod base;
 mod chain;
+mod feeding;
 mod fishing;
 mod jobs;
 mod names;
@@ -138,6 +139,7 @@ fn job_label(kind: Kind) -> &'static str {
     match kind {
         Kind::Harvest => "Harvest the crops, planted trees and tame animals around them, and replant the crops",
         Kind::Fish => "Fish with bait from the chests (a catch a minute)",
+        Kind::Feed => "Keep the animal feeders filled, with food from the chests or made from what they hold",
     }
 }
 
@@ -145,6 +147,7 @@ fn job_line(job: &Job) -> String {
     match job.kind {
         Kind::Harvest => format!("{} harvested, {} replanted so far - {}", job.done, job.replanted, job.status),
         Kind::Fish => format!("{} fish caught so far - {}", job.done, job.status),
+        Kind::Feed => format!("{} food put out so far - {}", job.done, job.status),
     }
 }
 
@@ -482,6 +485,11 @@ impl Assistants {
                         jobs::fish(&base, entity, WORK_EVERY, job, dice);
                         wish(job.npc, job.spot.map_or(walk::Want::Free, walk::Want::Go));
                     }
+                    Kind::Feed => {
+                        // walks to the feeder just filled, then goes on with the rest
+                        let site = (jobs::feed(&base, entity, job) > 0).then_some(job.site).flatten();
+                        wish(job.npc, site.map_or(walk::Want::Stay, walk::Want::Go));
+                    }
                 },
             }
             changed |= (job.done, job.status.clone()) != before;
@@ -551,6 +559,7 @@ impl Assistants {
                 finished.push(match kind {
                     Kind::Harvest => format!("{who} harvested {}.", item_list(&items)),
                     Kind::Fish => format!("{who} caught {}.", item_list(&items)),
+                    Kind::Feed => format!("{who} filled the feeders with {}.", item_list(&items)),
                 });
             }
         }
@@ -628,7 +637,7 @@ impl Mod for Assistants {
                     self.orders.save();
                 }
             }
-            (name @ ("harvest" | "fish"), Event::Change { value }) => {
+            (name @ ("harvest" | "fish" | "feed"), Event::Change { value }) => {
                 let kind = Kind::from_name(name).unwrap_or(Kind::Harvest);
                 self.switch_job(client, kind, value.as_bool().unwrap_or(false));
             }

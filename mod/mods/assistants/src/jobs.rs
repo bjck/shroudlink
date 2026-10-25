@@ -26,11 +26,16 @@ pub const SECONDS_PER_CATCH: u32 = 60;
 const MAX_CATCHES: u32 = 3;
 /// How far from the fisher a fishing spot counts, in metres.
 const SPOT_RADIUS: f64 = 60.0;
+/// How far around the farmer feeders are looked after outside a base (inside one: its whole
+/// build zone).
+const FEEDER_RADIUS: f64 = 40.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Harvest,
     Fish,
+    /// keeping the animal feeders filled
+    Feed,
 }
 
 impl Kind {
@@ -38,12 +43,14 @@ impl Kind {
         match self {
             Kind::Harvest => "harvest",
             Kind::Fish => "fish",
+            Kind::Feed => "feed",
         }
     }
     pub fn from_name(name: &str) -> Option<Kind> {
         match name {
             "harvest" => Some(Kind::Harvest),
             "fish" => Some(Kind::Fish),
+            "feed" => Some(Kind::Feed),
             _ => None,
         }
     }
@@ -54,6 +61,7 @@ pub fn kinds_for(workshop: u32) -> Vec<Kind> {
     let mut kinds = Vec::new();
     if workshop == FARMER_WORKSHOP {
         kinds.push(Kind::Harvest);
+        kinds.push(Kind::Feed);
     }
     if workshop == FISHER {
         kinds.push(Kind::Fish);
@@ -224,6 +232,88 @@ fn replant(base: &dyn Base, crop: u32, chests: &[u32]) -> Result<u32, Option<u32
     Err(None)
 }
 
+/// Fills the empty animal feeders around the farmer: with their food from the chests, else
+/// with a batch made from the ingredients in the chests (the Farmer's workshop recipe, as a
+/// player crafts it there: the ingredients go first, then the food is made in the feeder,
+/// so a failure can cost ingredients, never make food twice). Returns the food put in.
+pub fn feed(base: &dyn Base, farmer: u32, job: &mut Job) -> u32 {
+    job.news.clear();
+    let feeding = crate::feeding::data();
+    let chests = base.chests_near(farmer, RADIUS);
+    let mut filled = 0;
+    let mut short: Option<String> = None;
+    let feeders = base.feeders_near(farmer, FEEDER_RADIUS);
+    for &(feeder, item) in &feeders {
+        let Some(food) = feeding.food_of(item) else { continue };
+        if base.slots(feeder).iter().any(|s| s.count != 0) {
+            continue;
+        }
+        // food the players made already
+        let mut put = 0;
+        for &chest in &chests {
+            for s in base.slots(chest).into_iter().filter(|s| s.item == food && s.count != 0) {
+                put += base.move_items(chest, s.id, feeder, u32::MAX);
+            }
+            if put > 0 {
+                break;
+            }
+        }
+        if put == 0 {
+            put = make_food(base, &chests, feeder, food).unwrap_or_else(|missing| {
+                short = Some(format!("needs {} for {}", missing, crate::names::item(food)));
+                0
+            });
+        }
+        if put > 0 {
+            job.site = base.position(feeder).map(|p| p.map(|v| v as f32));
+            log!("assistants: feeder {feeder} filled with {put} x item {food}");
+            job.report(food, put);
+            filled += put;
+        }
+    }
+    job.done += filled;
+    job.status = match (feeders.is_empty(), short) {
+        (true, _) => "no animal feeder nearby".into(),
+        (false, Some(short)) => short,
+        (false, None) if filled > 0 => format!("filled {filled}"),
+        (false, None) => "the feeders have food".into(),
+    };
+    filled
+}
+
+/// Makes one batch of `food` into `feeder` from the chests; Err(what is missing).
+fn make_food(base: &dyn Base, chests: &[u32], feeder: u32, food: u32) -> Result<u32, String> {
+    let feeding = crate::feeding::data();
+    let recipe = feeding.recipe(food).ok_or_else(|| "a recipe".to_string())?;
+    let mut stock = crate::planner::Counts::new();
+    for &c in chests {
+        for s in base.slots(c).into_iter().filter(|s| s.count != 0) {
+            *stock.entry(s.item).or_default() += s.count;
+        }
+    }
+    let plan = crate::planner::feed(&feeding.table, recipe, 1, &crate::planner::Counts::new(), &stock);
+    if plan.runs == 0 {
+        let missing: Vec<String> = plan.missing.iter().map(|&(i, n)| format!("{n} {}", crate::names::item(i))).collect();
+        return Err(missing.join(", "));
+    }
+    for &(item, count) in &plan.moves {
+        let mut left = count;
+        for &c in chests {
+            for s in base.slots(c).into_iter().filter(|s| s.item == item && s.count != 0) {
+                if left == 0 {
+                    break;
+                }
+                left -= base.remove(c, s.id, left.min(s.count));
+            }
+        }
+        if left > 0 {
+            log!("assistants: {left} of {count} x item {item} could not be taken for feeder {feeder}");
+            return Err(format!("{left} {}", crate::names::item(item)));
+        }
+    }
+    Ok(base.give(feeder, food, recipe.makes(food)))
+}
+
 /// The first bait of the fisher's order that is in the chests: (chest, slot, bait item).
 fn find_bait(base: &dyn Base, chests: &[u32], preferred: &[u32]) -> Option<(u32, u64, u32)> {
     let slots: Vec<(u32, shroudlink_sdk::Slot)> = chests.iter().flat_map(|&c| base.slots(c).into_iter().filter(|s| s.count != 0).map(move |s| (c, s))).collect();
@@ -318,6 +408,39 @@ mod tests {
         assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
         assert!(base.finished.borrow().is_empty(), "a replanted crop is not removed");
         assert_eq!((base.count(CHEST, SEEDLING), base.count(CHEST, 500), job.replanted), (1, 3, 1));
+    }
+
+    #[test]
+    fn an_empty_feeder_gets_food_from_the_chests_or_a_batch_made_of_ingredients() {
+        let feeding = crate::feeding::data();
+        let (goat_feeder, yak_feeder) = (761665893, 3583405641);
+        let goat_food = feeding.food_of(goat_feeder).unwrap();
+        let yak_food = feeding.food_of(yak_feeder).unwrap();
+        let mut base = FakeBase::new(vec![]);
+        base.max_stack = 100;
+        // goat food made by a player already; for the yak only the ingredients
+        let yak: Vec<(u32, u32)> = feeding.recipe(yak_food).unwrap().inputs.iter().map(|i| match *i {
+            crate::recipes::Input::Item { item, count } => (item, count),
+            crate::recipes::Input::Category { .. } => unreachable!(),
+        }).collect();
+        let mut stock = vec![(goat_food, 30)];
+        stock.extend(yak.iter().copied());
+        base.chest(CHEST, 48, &stock);
+        base.chest(500, 8, &[]);
+        base.chest(501, 8, &[]);
+        base.feeders = vec![(500, goat_feeder), (501, yak_feeder)];
+        let mut job = Job::new(7, Kind::Feed);
+        feed(&base, GARDENER, &mut job);
+        assert_eq!(base.count(500, goat_food), 30, "the food in the chests");
+        assert_eq!(base.count(501, yak_food), 50, "a batch made");
+        assert!(yak.iter().all(|&(i, _)| base.count(CHEST, i) == 0), "the ingredients were used");
+        // full feeders are left alone; without ingredients the status says what is missing
+        feed(&base, GARDENER, &mut job);
+        assert_eq!(base.count(501, yak_food), 50);
+        base.chest(502, 8, &[]);
+        base.feeders.push((502, yak_feeder));
+        feed(&base, GARDENER, &mut job);
+        assert!(job.status.starts_with("needs "), "{}", job.status);
     }
 
     #[test]
