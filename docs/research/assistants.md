@@ -189,4 +189,9 @@ From the reflection data (`server/.cache/types.json`) and the live component byt
   the same.
 - Survivors and assistants only appear in the loaded world (near a player), so the self-test
   sees none; the station control is checked in game.
-- Choosing the station an NPC interacts with (perhaps through `isAvailable` of the others).
+- Choosing the station an NPC interacts with: the station's live `ActiveNpcTarget` reads as
+  `DynamicActiveNpcTarget` (isAvailable 1 at +0, a time at +8, the offset mask at +0x10,
+  usedByEntityId at +0x18), but the game recomputes `isAvailable` and `usedByEntityId`
+  every frame: writing 0 or another entity there is gone 5 s later. Steering the search
+  needs a hook in the AI's target search (not located) or the NPC's search radius
+  (`SearchTargetSetup`, template data).
