@@ -119,6 +119,10 @@ pub enum Harvest {
 /// (`FUN_140090df0`) replaces the shown stage (`DynamicUpgrade.entityId`) whenever it
 /// does not match the level, downwards too. A root at level 0 with its time in the past
 /// therefore grows again from stage 1.
+/// The level of a plant's first stage (`ecs::Upgrade.levels`, `farm_dump` ROOTSTAGE): a
+/// replanted crop starts there.
+const FIRST_LEVEL: u32 = 1;
+
 mod level {
     pub const STORAGE_OFFSET: usize = 0x4;
     pub const FLAGS: usize = 0x6;
@@ -472,14 +476,16 @@ impl Base for WorldBase<'_> {
             [a, b] if b == current && a != current => 1,
             _ => return false,
         };
-        if current == 0 {
+        // growth starts at level 1 (every plant's first stage); 0 has no stage, so a crop
+        // set to 0 kept its ripe stage standing
+        if current == FIRST_LEVEL {
             return false;
         }
         // the upgrade system swaps stages when the level changes, and leaves a loot stage
         // not yet marked looted standing (seen on beans: the root at level 1 under a ripe
         // stage): marked first, the swap takes it away
         self.finish_crop(crop);
-        l[at + index * 4..at + index * 4 + 4].copy_from_slice(&0u32.to_le_bytes());
+        l[at + index * 4..at + index * 4 + 4].copy_from_slice(&FIRST_LEVEL.to_le_bytes());
         self.world.set_component(root, "Level", &l)
     }
 
