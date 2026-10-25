@@ -85,6 +85,9 @@ pub const STYLE_TITLE: usize = 0x10a0c;
 /// Layer kinds (z-order): the HUD passes 5, the chest screen 6, popups above menus 0x1d.
 pub const LAYER_HUD: u32 = 5;
 pub const LAYER_POPUP: u32 = 0x1d;
+/// The MODS page: above the player menu's content (the inventory screen uses 6) and below
+/// the game's item tooltips (0xe, opened by `FUN_7ff623212e00`), which must cover it.
+pub const LAYER_PAGE: u32 = 0xd;
 
 /// Name/text argument: pointer, length and a 64 bit key (FNV-1a of the name for frame ids).
 #[repr(C)]

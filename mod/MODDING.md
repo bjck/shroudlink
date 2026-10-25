@@ -190,7 +190,9 @@ repeat counts up, "(×2)"): at the top while playing, at the bottom over menus.
 - Frames are identified by a 64-bit key; siblings need unique keys, and a key must stay with
   the same widget across frames (derive it from the content, not a counter).
 - A frame without a size fills its parent; give panels explicit sizes.
-- Layers are identified by kind: one layer per kind and frame (popups: 0x1d).
+- Layers are identified by kind: one layer per kind and frame, drawn in the order of their
+  kind: the inventory screen 6, the MODS page 0xd, the game's item tooltips 0xe (they open
+  their own layer), popups 0x1d.
 - Mod buttons test the cursor against their layout rectangle (`node+0x114`, UI units of a
   1920x1080 reference) instead of the game's interaction state, which misfires when a window
   is replaced from outside.
