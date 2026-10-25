@@ -59,6 +59,10 @@ static API: HostApi = HostApi {
     move_stack_between: crate::world::api_move_stack,
     apply_buff: crate::world::api_apply_buff,
     player_name: crate::world::api_player_name,
+    entities_near: crate::world::api_entities_near,
+    move_items: crate::world::api_move_items,
+    give_items: crate::items::api_give_items,
+    remove_items: crate::items::api_remove_items,
 };
 
 /// Ticks handed to v5 mods, for the self-test.

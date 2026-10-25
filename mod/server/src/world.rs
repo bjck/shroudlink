@@ -12,6 +12,7 @@ use chestsort_common::log;
 
 use crate::components::{self, hash};
 use crate::events;
+use crate::game::EntityRecord;
 use crate::world_ctx;
 
 const UNITS_PER_METRE: f64 = 4_294_967_296.0;
@@ -153,21 +154,52 @@ pub fn position(entity: u32) -> Option<[f64; 3]> {
 pub fn inventories_around(around: [f64; 3], radius: f64) -> Vec<(u32, [f64; 3], Option<String>)> {
     world_ctx::with(|ctx| unsafe {
         let game = events::game();
-        let mut found = Vec::new();
-        for entity in 1..2_000_000u32 {
-            if game.entity_record(ctx, entity).is_none() || game.inventory_setup(ctx, entity).is_none() || game.is_player(ctx, entity) {
-                continue;
-            }
-            let Some(record) = game.entity_record(ctx, entity) else { continue };
-            let Some((addr, _)) = components::of(ctx, &record, hash::CURRENT_TRANSFORM) else { continue };
-            let p = addr as *const i64;
-            let pos = [*p as f64 / UNITS_PER_METRE, *p.add(1) as f64 / UNITS_PER_METRE, *p.add(2) as f64 / UNITS_PER_METRE];
-            let d = ((pos[0] - around[0]).powi(2) + (pos[1] - around[1]).powi(2) + (pos[2] - around[2]).powi(2)).sqrt();
-            if d <= radius {
-                found.push((entity, pos, crate::game_api::name_of(game, ctx, entity)));
-            }
+        let keep = |entity: u32, _: &EntityRecord| game.inventory_setup(ctx, entity).is_some() && !game.is_player(ctx, entity);
+        scan_around(ctx, around, radius, keep).into_iter().map(|(entity, pos)| (entity, pos, crate::game_api::name_of(game, ctx, entity))).collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Entity ids the scans look at (the game's lookup is a bounds-checked hash map).
+const MAX_ENTITY: u32 = 2_000_000;
+/// How far past the highest entity id seen a scan looks: ids are handed out upwards, so
+/// new entities appear there. Looking up every possible id costs 5 ms when the game's
+/// worker threads are idle and 500 ms when they are busy (seen on a base with 150 chests).
+const ID_HEADROOM: u32 = 65_536;
+/// The highest entity id a scan found (0: none yet, the first scan looks at all ids).
+static HIGHEST_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Loaded entities within `radius` metres of `around` that `keep` accepts, with their
+/// position (`CurrentTransform`).
+unsafe fn scan_around(ctx: *mut crate::game::Ctx, around: [f64; 3], radius: f64, keep: impl Fn(u32, &EntityRecord) -> bool) -> Vec<(u32, [f64; 3])> {
+    let game = events::game();
+    let Some(transform) = components::index_of(ctx, hash::CURRENT_TRANSFORM) else { return Vec::new() };
+    let mut found = Vec::new();
+    let highest = HIGHEST_ID.load(std::sync::atomic::Ordering::Relaxed);
+    let end = if highest == 0 { MAX_ENTITY } else { highest.saturating_add(ID_HEADROOM).min(MAX_ENTITY) };
+    let mut seen = highest;
+    for entity in 1..end {
+        let Some(record) = game.entity_record(ctx, entity) else { continue };
+        seen = seen.max(entity);
+        let Some((addr, _)) = record.component(transform) else { continue };
+        let p = addr as *const i64;
+        let pos = [*p as f64 / UNITS_PER_METRE, *p.add(1) as f64 / UNITS_PER_METRE, *p.add(2) as f64 / UNITS_PER_METRE];
+        let d = ((pos[0] - around[0]).powi(2) + (pos[1] - around[1]).powi(2) + (pos[2] - around[2]).powi(2)).sqrt();
+        if d <= radius && keep(entity, &record) {
+            found.push((entity, pos));
         }
-        found
+    }
+    HIGHEST_ID.fetch_max(seen, std::sync::atomic::Ordering::Relaxed);
+    found
+}
+
+/// Loaded entities with a component of type `type_hash` within `radius` metres of
+/// `entity` (players included, `entity` itself too).
+pub fn entities_near(entity: u32, radius: f64, type_hash: u32) -> Vec<u32> {
+    let Some(around) = position(entity) else { return Vec::new() };
+    world_ctx::with(|ctx| unsafe {
+        let Some(index) = components::index_of(ctx, type_hash) else { return Vec::new() };
+        scan_around(ctx, around, radius, |_, record| record.component(index).is_some()).into_iter().map(|(e, _)| e).collect()
     })
     .unwrap_or_default()
 }
@@ -254,11 +286,13 @@ pub fn write_component(entity: u32, type_hash: u32, data: &[u8]) -> bool {
 /// excluded.
 pub fn inventories_near(entity: u32, radius: f64) -> Vec<u32> {
     let Some(around) = position(entity) else { return Vec::new() };
-    inventories_near_position(around, radius).into_iter().map(|(e, _, _)| e).collect()
-}
-
-fn inventories_near_position(around: [f64; 3], radius: f64) -> Vec<(u32, [f64; 3], Option<String>)> {
-    inventories_around(around, radius)
+    // without names: an unknown name key rescans the heap for name strings (~0.5 s)
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        let keep = |entity: u32, _: &EntityRecord| game.inventory_setup(ctx, entity).is_some() && !game.is_player(ctx, entity);
+        scan_around(ctx, around, radius, keep).into_iter().map(|(entity, _)| entity).collect()
+    })
+    .unwrap_or_default()
 }
 
 /// The slots of any entity's inventory: (slot id, item, count).
@@ -283,17 +317,32 @@ pub fn inventory(entity: u32) -> Vec<(u64, u32, u32)> {
 pub fn move_stack(from: u32, slot: u64, to: u32) -> u32 {
     world_ctx::with(|ctx| unsafe {
         let game = events::game();
-        let mut protected = std::collections::HashSet::new();
-        if game.is_player(ctx, from) {
-            let reserved = game.player_reserved(ctx, from);
-            protected.extend(reserved.slots);
-            for page in reserved.pages.into_iter().filter(|&p| p != 0) {
-                protected.extend((0..crate::game::SLOTS_PER_PAGE).map(|s| crate::game::slot_id(page, s)));
-            }
-        }
-        crate::game_api::move_stack_in(game, ctx, from, slot, to, &protected)
+        crate::game_api::move_stack_in(game, ctx, from, slot, to, &protected_of(game, ctx, from))
     })
     .unwrap_or(0)
+}
+
+/// Moves `count` items of a stack between two inventories (at most the stack), with the
+/// same protection as [`move_stack`].
+pub fn move_items(from: u32, slot: u64, to: u32, count: u32) -> u32 {
+    world_ctx::with(|ctx| unsafe {
+        let game = events::game();
+        crate::game_api::move_count_in(game, ctx, from, slot, to, count, &protected_of(game, ctx, from))
+    })
+    .unwrap_or(0)
+}
+
+/// A player's equipment, item in hand and action bar slots; nothing for other entities.
+unsafe fn protected_of(game: &crate::game::Game, ctx: *mut crate::game::Ctx, from: u32) -> std::collections::HashSet<u64> {
+    let mut protected = std::collections::HashSet::new();
+    if game.is_player(ctx, from) {
+        let reserved = game.player_reserved(ctx, from);
+        protected.extend(reserved.slots);
+        for page in reserved.pages.into_iter().filter(|&p| p != 0) {
+            protected.extend((0..crate::game::SLOTS_PER_PAGE).map(|s| crate::game::slot_id(page, s)));
+        }
+    }
+    protected
 }
 
 // ---- C functions of HostApi v4 ----
@@ -342,6 +391,16 @@ pub unsafe extern "C" fn api_inventory(entity: u32, out: *mut shroudlink_sdk::Sl
 
 pub unsafe extern "C" fn api_move_stack(from: u32, slot: u64, to: u32) -> u32 {
     move_stack(from, slot, to)
+}
+
+pub unsafe extern "C" fn api_entities_near(entity: u32, radius: f64, type_hash: u32, out: *mut u32, cap: usize) -> usize {
+    let found = entities_near(entity, radius, type_hash);
+    std::ptr::copy_nonoverlapping(found.as_ptr(), out, found.len().min(cap));
+    found.len()
+}
+
+pub unsafe extern "C" fn api_move_items(from: u32, slot: u64, to: u32, count: u32) -> u32 {
+    move_items(from, slot, to, count)
 }
 
 pub unsafe extern "C" fn api_apply_buff(entity: u32, buff: *const u8, seconds: f64) -> bool {

@@ -95,6 +95,10 @@ impl Host {
     pub fn send(&mut self, client: ClientId, message: &Value) {
         let Some(&slot) = self.sessions.get(&client.0) else { return };
         let bytes = serde_json::to_vec(message).unwrap_or_default();
+        // test automation reads what windows and notifications say
+        if crate::game_events::probing() && matches!(message["op"].as_str(), Some("open" | "notify")) {
+            log!("probe: sent {}", String::from_utf8_lossy(&bytes).chars().take(4000).collect::<String>());
+        }
         let msg = self.next_msg;
         self.next_msg = self.next_msg.wrapping_add(1);
         for packet in split_message(client.0, msg, &bytes) {

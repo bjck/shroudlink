@@ -1,0 +1,13 @@
+[package]
+name = "assistants"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# shroudlink_mods/assistants.dll next to the server
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde_json.workspace = true
+shroudlink-sdk = { path = "../../sdk" }

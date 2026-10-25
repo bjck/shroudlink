@@ -19,7 +19,8 @@ pub type DepositIntoChestFn =
     unsafe extern "system" fn(out: *mut DepositResult, ctx: *mut Ctx, chest: u32, player: u32, feedback: *mut c_void) -> *mut DepositResult;
 
 type StorageOfFn = unsafe extern "system" fn(world: *mut c_void) -> *mut c_void;
-type ComponentByIdFn = unsafe extern "system" fn(out: *mut *mut u8, storage: *mut c_void, handle: usize, entity: u32) -> *mut *mut u8;
+/// Writes the component's address and its size (16 bytes) into `out` and returns `out`.
+type ComponentByIdFn = unsafe extern "system" fn(out: *mut [usize; 2], storage: *mut c_void, handle: usize, entity: u32) -> *mut *mut u8;
 type CollectPagesFn = unsafe extern "system" fn(list: *mut PageList, ctx: *mut Ctx, setup: *mut u8) -> u64;
 type PlayerLinksFn = unsafe extern "system" fn(world: *mut c_void, handle: usize, entity: u32) -> *mut u8;
 type ItemInfoFn = unsafe extern "system" fn(item_id: u32, registry: usize) -> *const ItemInfo;
@@ -71,6 +72,10 @@ pub struct ItemStack {
 }
 
 pub const SLOTS_PER_PAGE: u8 = 8;
+
+/// Transfer modes of the game's slot transfer.
+pub const TRANSFER_STACK: i32 = 0;
+pub const TRANSFER_ONE: i32 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -193,7 +198,8 @@ impl Game {
     /// `InventorySetup` component of an entity, if initialised.
     pub unsafe fn inventory_setup(&self, ctx: *mut Ctx, entity: u32) -> Option<*mut u8> {
         let storage = (self.storage_of)(*((*ctx).world() as *mut *mut c_void));
-        let mut out: *mut u8 = std::ptr::null_mut();
+        // address + size: an 8-byte buffer here once overwrote a saved register
+        let mut out = [0usize; 2];
         let setup = *(self.component_by_id)(&mut out, storage, (*ctx).word(3), entity);
         (!setup.is_null() && *setup.add(0x53) != 0).then_some(setup)
     }
@@ -241,8 +247,14 @@ impl Game {
 
     /// Vanilla transfer between two inventory slots (mode 0 = whole stack).
     pub unsafe fn transfer(&self, ctx: *mut Ctx, dst: u64, src: u64) -> TransferResult {
+        self.transfer_mode(ctx, dst, src, TRANSFER_STACK)
+    }
+
+    /// Vanilla transfer with a mode: [`TRANSFER_STACK`], half or [`TRANSFER_ONE`]
+    /// (`FUN_1401aed90`: the mode decides the amount; 1 and 2 also split into an empty slot).
+    pub unsafe fn transfer_mode(&self, ctx: *mut Ctx, dst: u64, src: u64, mode: i32) -> TransferResult {
         let mut result = TransferResult::default();
-        (self.transfer)(&mut result, ctx, dst, src, 0);
+        (self.transfer)(&mut result, ctx, dst, src, mode);
         result
     }
 

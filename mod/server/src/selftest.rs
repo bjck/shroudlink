@@ -167,6 +167,15 @@ unsafe fn run(ctx: *mut Ctx) {
         "backpack section offered",
         if welcome.iter().any(|m| m["op"] == "section" && m["owner"] == "hello") { Ok("hello adds its Wave row".into()) } else { Err("no section from hello".into()) },
     );
+    let assistants = send(json!({ "mod": "assistants", "op": "ui_event", "event": { "window": "", "node": "open", "event": { "kind": "menu" } } }));
+    report.check(
+        "assistants window",
+        if welcome.iter().any(|m| m["op"] == "entries" && m["owner"] == "assistants") && assistants.iter().any(|m| m["op"] == "open" && m["window"]["title"] == "Assistants") {
+            Ok("menu entry, and the window opens".into())
+        } else {
+            Err(format!("got {assistants:?}"))
+        },
+    );
     let wave = send(json!({ "mod": "hello", "op": "ui_event", "event": { "window": "wave", "node": "wave", "event": { "kind": "click" } } }));
     report.check("notification", if wave.iter().any(|m| m["op"] == "notify") { Ok("Wave answers with a HUD message".into()) } else { Err(format!("got {wave:?}")) });
     let open = send(ui_event("", "categories", json!({ "kind": "menu" })));
@@ -239,6 +248,40 @@ unsafe fn run(ctx: *mut Ctx) {
 
     let _ = writeln!(report.text, "{}", if report.failed == 0 { "RESULT ok".to_string() } else { format!("RESULT {} failure(s)", report.failed) });
     write_report(&report.text);
+}
+
+/// Research lines for the assistants mod: every loaded production station and NPC with
+/// the state the mod reads (`ecs::FactoryStation`, `ecs::Crafting`, `ecs::NetworkFuel`,
+/// `ecs::ActiveNpcState`). Without players only the world around spawn is loaded.
+fn research_production(report: &mut Report, around: u32) {
+    let hash = |name: &str| shroudlink_sdk::components::hash_of(name).unwrap_or(0);
+    let read = |entity: u32, name: &str| {
+        let mut data = [0u8; 512];
+        let size = crate::world::read_component(entity, hash(name), &mut data);
+        (size != 0).then(|| data[..size.min(512)].to_vec())
+    };
+    let u32_at = |data: &[u8], at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+    let started = std::time::Instant::now();
+    let stations = crate::world::entities_near(around, 1e7, hash("FactoryStation"));
+    let _ = writeln!(report.text, "INFO entities_near scans the loaded world in {:.1} ms", started.elapsed().as_secs_f64() * 1000.0);
+    let npcs = crate::world::entities_near(around, 1e7, hash("ActiveNpcState"));
+    let _ = writeln!(report.text, "INFO production: {} station(s), {} NPC(s) loaded", stations.len(), npcs.len());
+    for &station in stations.iter().take(20) {
+        let Some(f) = read(station, "FactoryStation") else { continue };
+        let workshop = read(station, "Crafting").map_or(0, |c| u32_at(&c, 0x10));
+        let fuel = read(station, "NetworkFuel").map(|n| format!("{}/{}", u16::from_le_bytes([n[0], n[1]]), u16::from_le_bytes([n[2], n[3]])));
+        let stacks: Vec<String> = crate::world::inventory(station).iter().filter(|s| s.2 != 0).map(|s| format!("{}x{}", s.2, s.1)).collect();
+        let _ = writeln!(
+            report.text,
+            "INFO station {station}: workshop {workshop}, state {}, running {}, next {}, stopped {}, missing {:#04x}, fuel {}, holds [{}]",
+            f[0], u32_at(&f, 4), u32_at(&f, 0x28), f[0x61], f[0x62], fuel.as_deref().unwrap_or("-"), stacks.join(" ")
+        );
+    }
+    for &npc in npcs.iter().take(20) {
+        let id = read(npc, "ActiveNpcState").map_or(0, |a| u32_at(&a, 0));
+        let workshop = read(npc, "Crafting").map_or(0, |c| u32_at(&c, 0x10));
+        let _ = writeln!(report.text, "INFO npc {npc}: npc id {id}, workshop {workshop}, at {:?}", crate::world::position(npc).map(|p| p.map(|v| v.round())));
+    }
 }
 
 /// Writes a stack straight into an inventory slot (test setup only).
@@ -320,6 +363,37 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     let mut transform = [0u8; 64];
     let size = crate::world::read_component(chest, crate::components::hash::CURRENT_TRANSFORM, &mut transform);
     report.check("world component read", if size == 56 { Ok(format!("CurrentTransform of the chest, {size} bytes")) } else { Err(format!("size {size}")) });
+
+    // ---- HostApi v6: exact counts, entities by component ----
+    let before = ores_in_chest(&crate::world::inventory(chest));
+    let source = put(game, ctx, player, 4, ore, 9);
+    let moved = source.map_or(0, |slot| crate::world::move_items(player, slot, chest, 3));
+    let after = ores_in_chest(&crate::world::inventory(chest));
+    let left = source.and_then(|slot| crate::world::inventory(player).into_iter().find(|s| s.0 == slot)).map_or(0, |s| s.2);
+    report.check(
+        "world move_items",
+        if moved == 3 && after == before + 3 && left == 6 { Ok(format!("3 of 9 iron bars moved, chest {before} -> {after}, 6 left")) } else { Err(format!("moved {moved}, chest {before} -> {after}, {left} left")) },
+    );
+    let setup_hash = shroudlink_sdk::components::hash_of("InventorySetup").unwrap_or(0);
+    let near = crate::world::entities_near(chest, 0.5, setup_hash);
+    report.check("world entities_near", if near.contains(&chest) { Ok(format!("{} inventory entity(s) within 0.5 m of the test chest", near.len())) } else { Err(format!("found {near:?}")) });
+    // ---- HostApi v7: items made and taken by the game's own functions ----
+    if crate::hooks::available(crate::hooks::Feature::Items) {
+        let fibres = |s: &[(u64, u32, u32)]| s.iter().filter(|x| x.1 == fibre).map(|x| x.2).sum::<u32>();
+        let before = fibres(&crate::world::inventory(chest));
+        let given = crate::items::give(chest, fibre, 5);
+        let after = fibres(&crate::world::inventory(chest));
+        report.check("give_items", if given == 5 && after == before + 5 { Ok(format!("5 plant fibre created, chest {before} -> {after}")) } else { Err(format!("gave {given}, chest {before} -> {after}")) });
+        let slot = crate::world::inventory(chest).into_iter().find(|s| s.1 == fibre && s.2 >= 2).map(|s| s.0);
+        let removed = slot.map_or(0, |s| crate::items::remove(chest, s, 2));
+        let left = fibres(&crate::world::inventory(chest));
+        report.check("remove_items", if removed == 2 && left == after - 2 { Ok(format!("2 removed, chest {after} -> {left}")) } else { Err(format!("removed {removed}, chest {after} -> {left}")) });
+        let refused = crate::items::give(player, fibre, 1) == 0 || !game.is_player(ctx, player);
+        report.check("give_items refuses players", if refused { Ok("nothing created in the test player".into()) } else { Err("created items in a player".into()) });
+    } else {
+        report.skip("give_items", "feature items is off");
+    }
+    research_production(report, chest);
     // buffs need a running impact program, which needs a real player nearby
     let _ = writeln!(report.text, "INFO buffs: feature {}, getSelf ran {} time(s) so far", if crate::hooks::available(crate::hooks::Feature::Buffs) { "on" } else { "OFF" }, crate::buffs::calls());
     FAKE_PLAYER.store(0, Ordering::SeqCst);

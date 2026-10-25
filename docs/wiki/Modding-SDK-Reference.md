@@ -97,6 +97,10 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `inventories_near(entity, radius)` | entities with an inventory (chests, stations) around an entity; only the world around players is loaded |
 | `inventory(entity)` | every slot of any entity's inventory |
 | `move_stack(from, slot, to)` | moves a stack between two inventories outside any player action; a player's equipment, item in hand and action bar are never taken nor filled |
+| `move_items(from, slot, to, count)` | moves `count` items of a stack (at most the stack), with the same protection; below a whole stack the game moves one item per transfer (core v6) |
+| `give_items(entity, item, count)` | creates plain stackable items in an inventory through the game's own function (core v7, feature `items`); never in a player, nothing with durability or rolled stats. It makes items out of nothing: make the player pay for them |
+| `remove_items(entity, slot, count)` | removes items from a slot (core v7; not a player's; plain items only) |
+| `entities_near(entity, radius, "TypeName")` | loaded entities with a component of that type around an entity: stations (`FactoryStation`), NPCs (`ActiveNpcState`) … (core v6). It scans every loaded entity, so call it every few seconds, not every frame |
 | `apply_buff(entity, "guid", seconds)` | gives an entity a vanilla buff by the Guid of its `BuffType`, the way an item or spell would (core v5), and keeps it up for `seconds` (0: once; also ends a kept buff). Item buffs often last only 0.3 s on their own. Clients show its effects from their own data, so no client files are needed |
 
 `components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
@@ -105,6 +109,9 @@ an item from all of them with one click.
 `mods/travel` is a complete example: it reads the player's `PlayerWaypoint` (the map
 marker) and teleports there. `mods/lantern` gives the Ring of Light's buff (a light on
 the chest) for 10 minutes when a player drinks a Wisp of Light flask (`ConsumeItemEvent`).
+`mods/assistants` has survivors run the base's production stations on order: it finds
+them with `entities_near`, fills a station with `move_items`, sets its next recipe in its
+`FactoryStation` component and empties the results into the chests.
 
 ## Game API: `Game` (only inside `keep` / `on_transfer`)
 
@@ -141,6 +148,6 @@ a length, and game calls are plain C functions taking the opaque `game` pointer 
 current callback.
 
 - v2 appended inventory events to the v1 layout, v3 appended game events, and v5
-  appended `on_tick` (`HostApi` v5: `apply_buff`). The host still loads older mods; they
+  appended `on_tick` (`HostApi` v5: `apply_buff`; v6: `entities_near`, `move_items`; v7: `give_items`, `remove_items`). The host still loads older mods; they
   get no callbacks their version does not know.
 - New host functions are only ever appended.

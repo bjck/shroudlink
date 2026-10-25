@@ -54,8 +54,9 @@ pub use events::{GameEvent, Known};
 
 /// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v4 mods. `HostApi`
 /// tells its own version: functions newer than it must not be called (the SDK checks).
-/// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`.
-pub const ABI_VERSION: u32 = 5;
+/// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`; v6 appends
+/// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`.
+pub const ABI_VERSION: u32 = 7;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -139,6 +140,17 @@ pub struct HostApi {
     pub apply_buff: unsafe extern "C" fn(entity: u32, buff: *const u8, seconds: f64) -> bool,
     /// Copies up to `cap` bytes of a player's name (UTF-8); returns its length, 0: unknown.
     pub player_name: unsafe extern "C" fn(entity: u32, buf: *mut u8, cap: usize) -> usize,
+    // v6
+    /// Writes up to `cap` loaded entities with a component of type `type_hash` within
+    /// `radius` metres of `entity`; returns how many there are.
+    pub entities_near: unsafe extern "C" fn(entity: u32, radius: f64, type_hash: u32, out: *mut u32, cap: usize) -> usize,
+    /// Moves `count` items of a stack between two inventories; returns the items moved.
+    pub move_items: unsafe extern "C" fn(from: u32, slot: u64, to: u32, count: u32) -> u32,
+    // v7
+    /// Creates up to `count` of a plain stackable item in an entity's inventory; returns how many.
+    pub give_items: unsafe extern "C" fn(entity: u32, item: u32, count: u32) -> u32,
+    /// Removes up to `count` items from a slot; returns how many.
+    pub remove_items: unsafe extern "C" fn(entity: u32, slot: u64, count: u32) -> u32,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -317,6 +329,52 @@ impl World<'_> {
     pub fn apply_buff(&self, entity: u32, buff: &str, seconds: f64) -> bool {
         let Some(guid) = guid_bytes(buff) else { return false };
         self.api.version >= 5 && unsafe { (self.api.apply_buff)(entity, guid.as_ptr(), seconds) }
+    }
+
+    /// Loaded entities that have a component of this type (see [`components::COMPONENT_TYPES`])
+    /// within `radius` metres of `entity`: stations (`FactoryStation`), NPCs
+    /// (`ActiveNpcState`), … Players and `entity` itself are included when they match.
+    /// Scans every loaded entity, so call it every few seconds, not every frame (host v6).
+    pub fn entities_near(&self, entity: u32, radius: f64, type_name: &str) -> Vec<u32> {
+        let Some(hash) = components::hash_of(type_name) else { return Vec::new() };
+        if self.api.version < 6 {
+            return Vec::new();
+        }
+        let mut out = vec![0u32; 1024];
+        let n = unsafe { (self.api.entities_near)(entity, radius, hash, out.as_mut_ptr(), out.len()) };
+        out.truncate(n.min(1024));
+        out
+    }
+
+    /// Moves `count` items of the stack in `slot` of `from`'s inventory into `to`'s
+    /// (partial stacks first), at most the whole stack, with the protection of
+    /// [`World::move_stack`]. Returns how many items moved (host v6).
+    pub fn move_items(&self, from: u32, slot: u64, to: u32, count: u32) -> u32 {
+        if self.api.version < 6 {
+            return 0;
+        }
+        unsafe { (self.api.move_items)(from, slot, to, count) }
+    }
+
+    /// Creates up to `count` of `item` in an entity's inventory (partial stacks first, then
+    /// free slots) through the game's own function, as a station does with its results.
+    /// Only plain stackable items (none with durability or rolled stats), never in a
+    /// player's inventory. Returns how many were created (host v7; the feature "items").
+    /// This makes items out of nothing: make the player pay for them somehow.
+    pub fn give_items(&self, entity: u32, item: u32, count: u32) -> u32 {
+        if self.api.version < 7 {
+            return 0;
+        }
+        unsafe { (self.api.give_items)(entity, item, count) }
+    }
+
+    /// Removes up to `count` items from a slot of an entity's inventory (not a player's;
+    /// plain stackable items only). Returns how many were removed (host v7).
+    pub fn remove_items(&self, entity: u32, slot: u64, count: u32) -> u32 {
+        if self.api.version < 7 {
+            return 0;
+        }
+        unsafe { (self.api.remove_items)(entity, slot, count) }
     }
 
     /// A player's name (their Steam name), known once their addon has identified the
@@ -641,11 +699,23 @@ pub mod testing {
     unsafe extern "C" fn player_name(_: u32, _: *mut u8, _: usize) -> usize {
         0
     }
+    unsafe extern "C" fn entities_near(_: u32, _: f64, _: u32, _: *mut u32, _: usize) -> usize {
+        0
+    }
+    unsafe extern "C" fn move_items(_: u32, _: u64, _: u32, _: u32) -> u32 {
+        0
+    }
+    unsafe extern "C" fn give_items(_: u32, _: u32, _: u32) -> u32 {
+        0
+    }
+    unsafe extern "C" fn remove_items(_: u32, _: u64, _: u32) -> u32 {
+        0
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items },
                 sent: Box::default(),
             }
         }

@@ -17,6 +17,7 @@ mod game;
 mod game_events;
 mod game_api;
 mod hooks;
+mod items;
 mod link_host;
 mod mods;
 mod names;

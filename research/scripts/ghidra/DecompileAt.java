@@ -24,7 +24,31 @@ public class DecompileAt extends GhidraScript {
         decomp.openProgram(currentProgram);
 
         for (int i = 1; i < args.length; i++) {
-            Function f = getFunctionContaining(toAddr(args[i]));
+            // "@<addr>[:<len>]": a function entry the auto-analysis missed (.pdata has it, and
+            // its length); created in memory, the project stays read-only
+            boolean entry = args[i].startsWith("@");
+            String addr = entry ? args[i].substring(1) : args[i];
+            long length = 0x10;
+            if (addr.contains(":")) {
+                length = Long.decode(addr.substring(addr.indexOf(':') + 1));
+                addr = addr.substring(0, addr.indexOf(':'));
+            }
+            Function f = entry ? getFunctionAt(toAddr(addr)) : getFunctionContaining(toAddr(addr));
+            if (f == null && entry) {
+                // the analysis may have merged it into the function before it
+                Function merged = getFunctionContaining(toAddr(addr));
+                if (merged != null) {
+                    removeFunction(merged);
+                    createFunction(merged.getEntryPoint(), null);
+                }
+                // instructions decoded at the wrong alignment or data may be left over
+                clearListing(toAddr(addr), toAddr(addr).add(length - 1));
+                boolean ok = disassemble(toAddr(addr));
+                f = createFunction(toAddr(addr), null);
+                if (f == null) {
+                    println("could not create a function at " + addr + " (disassembled: " + ok + ", instruction: " + getInstructionAt(toAddr(addr)) + ", data: " + getDataAt(toAddr(addr)) + ")");
+                }
+            }
             if (f == null) {
                 println("no function at " + args[i]);
                 continue;

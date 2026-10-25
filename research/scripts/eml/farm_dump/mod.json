@@ -1,0 +1,1 @@
+{ "id": "farm_dump", "name": "farm dump", "version": "0.1.0", "capabilities": ["export"] }

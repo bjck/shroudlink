@@ -29,6 +29,8 @@ pub enum Feature {
     GameEvents,
     /// buffs for mods, through the game's impact VM
     Buffs,
+    /// creating and removing items for mods (`server/src/items.rs`)
+    Items,
 }
 
 impl Feature {
@@ -40,6 +42,7 @@ impl Feature {
             Feature::WorldContext => "world_context",
             Feature::GameEvents => "game_events",
             Feature::Buffs => "buffs",
+            Feature::Items => "items",
         }
     }
 }
@@ -74,6 +77,10 @@ pub const POINTS: &[HookPoint] = &[
     HookPoint { name: "impact_get_self", feature: Feature::Buffs, signature: "40 57 48 83 EC 20 48 8B 02 48 8B F9 4D 8B 08 8B 08 85 C9 74 ?? 0F B7 C1 49 8B 48 30 48 89 5C 24 38" },
     // FUN_1401775c0(out, args, vm): impact native applyBuff(buffType, target, …)
     HookPoint { name: "impact_apply_buff", feature: Feature::Buffs, signature: "4C 89 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 80" },
+    // FUN_1401ac790(out, ctx, entity, slot, item, count, level?, rarity?, data?): puts items into an inventory
+    HookPoint { name: "give_items", feature: Feature::Items, signature: "4C 89 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 48 8D AC 24 60 FF FF FF" },
+    // FUN_1401b3c00(out, ctx, slot, count, clear): takes items out of a slot
+    HookPoint { name: "take_items", feature: Feature::Items, signature: "40 53 55 57 41 54 41 56 48 83 EC 60" },
     // FUN_14003aba0(ctx): zeroes an inventory context
     HookPoint { name: "init_ctx", feature: Feature::WorldContext, signature: "33 D2 33 C0 48 89 11 48 89 51 08 48 89 51 10 48 89 51 18 48 89 51 20 48 89 51 28 48 89 51 30 48 89 51 38 48 89 51 40 48 89 51 48 48 89 51 50 48 89 51 58 48 89 51 60 48 89 51 68 48 89 51 70 48 89 51 78 48 89 81 80 00 00 00" },
 ];
@@ -127,7 +134,7 @@ pub fn disable(feature: Feature, reason: String) {
     registry().disabled.insert(feature, reason);
 }
 
-pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::WorldContext, Feature::Buffs];
+pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::WorldContext, Feature::Buffs, Feature::Items];
 
 /// The features that work, for addons and mods (none before the scan, e.g. in unit tests).
 pub fn working() -> Vec<&'static str> {
