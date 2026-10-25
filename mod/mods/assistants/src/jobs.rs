@@ -200,8 +200,10 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
             }
         }
         moved += from_plant;
-        // a crop is finished (or replanted) only right after its harvest was taken
-        if kind != Harvest::Crop || from_plant == 0 || base.slots(plant).iter().any(|s| s.count != 0) {
+        // a crop is finished (or replanted) only right after its harvest was taken, or when
+        // it was picked before and still waits for its seedling
+        let picked_before = from_plant == 0 && kind == Harvest::Crop && base.crop_picked(plant);
+        if kind != Harvest::Crop || (from_plant == 0 && !picked_before) || base.slots(plant).iter().any(|s| s.count != 0) {
             continue;
         }
         match replant(base, plant, &chests) {
@@ -535,6 +537,22 @@ mod tests {
         // marked picked: the next round gives nothing more
         harvest(&base, GARDENER, &mut job);
         assert_eq!(base.count(CHEST, BEAN), 3);
+    }
+
+    #[test]
+    fn a_bean_picked_before_is_replanted_once_a_seedling_is_there() {
+        const BEAN: u32 = 650;
+        let mut base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[(SEEDLING, 1)]);
+        base.chest(CROP, 8, &[]);
+        base.harvest = vec![(CROP, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        base.loot.insert(CROP, vec![(BEAN, 3)]);
+        base.looted.borrow_mut().push(CROP);
+        let mut job = Job::new(7, Kind::Harvest);
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!(base.count(CHEST, BEAN), 0, "no second harvest");
+        assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
     }
 
     #[test]

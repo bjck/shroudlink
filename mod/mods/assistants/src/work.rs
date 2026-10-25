@@ -505,6 +505,9 @@ pub mod fake {
             self.looted.borrow_mut().push(crop);
             true
         }
+        fn crop_picked(&self, crop: u32) -> bool {
+            self.looted.borrow().contains(&crop) && self.inventories.borrow().get(&crop).is_none_or(|i| i.iter().all(|s| s.1 == 0))
+        }
         fn crop_seedling(&self, crop: u32) -> Option<u32> {
             self.seedlings.get(&crop).copied()
         }

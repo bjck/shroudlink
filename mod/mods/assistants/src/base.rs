@@ -188,6 +188,8 @@ pub trait Base {
     /// Marks such a crop picked (`applied` = 1), before its harvest is made: a crop that
     /// stays (replanting failed) is never harvested twice.
     fn mark_looted(&self, crop: u32) -> bool;
+    /// A scatter-loot crop picked already (marked, nothing in it): it waits to be replanted.
+    fn crop_picked(&self, crop: u32) -> bool;
     /// Starts a ripe crop's plant over from its first growth stage (after its harvest was
     /// taken), as the game's growth does with each stage; false if that was not possible.
     fn replant(&self, crop: u32) -> bool;
@@ -415,6 +417,12 @@ impl Base for WorldBase<'_> {
         let d = self.world.component(crop, "DefaultInventory")?;
         let harvest = &crate::plants::crops().get(&crate::fishing::guid_text(&d)?)?.harvest;
         (*d.get(default_inventory::APPLIED)? == 0 && !harvest.is_empty()).then(|| harvest.clone())
+    }
+
+    fn crop_picked(&self, crop: u32) -> bool {
+        let Some(d) = self.world.component(crop, "DefaultInventory") else { return false };
+        let loot_crop = crate::fishing::guid_text(&d).and_then(|g| crate::plants::crops().get(&g).map(|c| !c.harvest.is_empty())) == Some(true);
+        loot_crop && d.get(default_inventory::APPLIED) == Some(&1) && self.world.inventory(crop).iter().all(|s| s.count == 0)
     }
 
     fn mark_looted(&self, crop: u32) -> bool {
