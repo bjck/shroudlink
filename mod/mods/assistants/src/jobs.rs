@@ -2,9 +2,9 @@
 //!
 //! - the **gardener** (the Farmer or the Farmer's assistant) harvests what grows around them
 //!   into the chests: ripe crops, which they replant with a seedling from the chests (the
-//!   plant starts over from its first stage; without a seedling the game removes it, as
-//!   after a player's harvest), and the fruit of planted trees and bushes and the produce
-//!   of tame animals, which refill on their own;
+//!   plant starts over from its first stage; without a seedling the crop stays ripe until
+//!   there is one, as picking it would leave the soil empty), and the fruit of planted
+//!   trees and bushes and the produce of tame animals, which refill on their own;
 //! - the **fisher** fishes: one catch a minute while the base is loaded, each costing one
 //!   bait from the chests, the fish drawn from the spawn table of a fishing spot nearby (or
 //!   the one players fish from anywhere) as the bait attracts it. The fish is created by
@@ -152,6 +152,38 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
     let mut crops_harvested = Vec::new();
     for (plant, kind) in base.harvestables_near(gardener, RADIUS) {
         let mut from_plant = 0;
+        // a crop is picked only when it can be replanted: without a seedling it stays ripe
+        // on its field (picking it would leave the soil empty) until the Seedbed made some
+        if kind == Harvest::Crop {
+            if let Some(seedling) = base.crop_seedling(plant) {
+                let have = chests.iter().any(|&c| base.slots(c).iter().any(|s| s.item == seedling && s.count != 0));
+                if !have {
+                    want(seedling);
+                    no_seedling = Some(seedling);
+                    continue;
+                }
+            }
+        }
+        // a scatter-loot crop (beans …) holds nothing: its harvest is made as picking makes
+        // it, after it is marked picked, into the chests
+        if let (Harvest::Crop, Some(loot)) = (kind, base.crop_loot(plant)) {
+            if base.mark_looted(plant) {
+                for (item, count) in loot {
+                    let mut left = count;
+                    for &chest in &chests {
+                        if left == 0 {
+                            break;
+                        }
+                        left -= base.give(chest, item, left);
+                    }
+                    if count > left {
+                        job.report(item, count - left);
+                    }
+                    from_plant += count - left;
+                    stuck |= left > 0;
+                }
+            }
+        }
         for slot in base.slots(plant).into_iter().filter(|s| s.count != 0) {
             let n = deposit(base, plant, slot.id, slot.item, slot.count, &chests);
             if n > 0 {
@@ -205,7 +237,7 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
     job.status = if stuck {
         "no room in the chests".into()
     } else if let Some(seedling) = no_seedling {
-        format!("no {} in the chests to replant", crate::names::item(seedling))
+        format!("ripe crops wait for {} to replant them", crate::names::item(seedling))
     } else if moved > 0 {
         format!("harvested {moved}")
     } else {
@@ -245,6 +277,12 @@ pub fn feed(base: &dyn Base, farmer: u32, job: &mut Job) -> u32 {
     let feeders = base.feeders_near(farmer, FEEDER_RADIUS);
     for &(feeder, item) in &feeders {
         let Some(food) = feeding.food_of(item) else { continue };
+        // what is no food for it goes back to the chests (feeders counted as chests once,
+        // and the gardener put harvest into them)
+        for s in base.slots(feeder).into_iter().filter(|s| s.count != 0 && s.item != food) {
+            let moved = deposit(base, feeder, s.id, s.item, s.count, &chests);
+            log!("assistants: feeder {feeder}: {moved} x item {} that is no food for it back to the chests", s.item);
+        }
         if base.slots(feeder).iter().any(|s| s.count != 0) {
             continue;
         }
@@ -434,6 +472,13 @@ mod tests {
         assert_eq!(base.count(500, goat_food), 30, "the food in the chests");
         assert_eq!(base.count(501, yak_food), 50, "a batch made");
         assert!(yak.iter().all(|&(i, _)| base.count(CHEST, i) == 0), "the ingredients were used");
+        // something that is no food for it goes back to the chests, then the food goes in
+        base.chest(503, 8, &[(SEEDLING, 4)]);
+        base.feeders.push((503, goat_feeder));
+        base.chest(CHEST + 1, 48, &[(goat_food, 10)]);
+        feed(&base, GARDENER, &mut job);
+        assert_eq!((base.count(503, SEEDLING), base.count(503, goat_food)), (0, 10));
+        base.feeders.pop();
         // full feeders are left alone; without ingredients the status says what is missing
         feed(&base, GARDENER, &mut job);
         assert_eq!(base.count(501, yak_food), 50);
@@ -475,6 +520,24 @@ mod tests {
     }
 
     #[test]
+    fn a_bean_is_picked_into_the_chests_once_and_replanted() {
+        const BEAN: u32 = 650;
+        let mut base = FakeBase::new(vec![]);
+        base.chest(CHEST, 48, &[(SEEDLING, 2)]);
+        base.chest(CROP, 8, &[]);
+        base.harvest = vec![(CROP, Harvest::Crop)];
+        base.seedlings.insert(CROP, SEEDLING);
+        base.loot.insert(CROP, vec![(BEAN, 3)]);
+        let mut job = Job::new(7, Kind::Harvest);
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!(base.count(CHEST, BEAN), 3);
+        assert_eq!(base.replanted.borrow().as_slice(), &[CROP]);
+        // marked picked: the next round gives nothing more
+        harvest(&base, GARDENER, &mut job);
+        assert_eq!(base.count(CHEST, BEAN), 3);
+    }
+
+    #[test]
     fn the_gardener_works_among_the_growing_crops() {
         let mut base = FakeBase::new(vec![]);
         base.chest(CHEST, 48, &[]);
@@ -506,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn without_a_seedling_the_crop_goes_as_in_vanilla() {
+    fn without_a_seedling_the_crop_stays_ripe_on_its_field() {
         let mut base = FakeBase::new(vec![]);
         base.chest(CHEST, 48, &[]);
         base.chest(CROP, 8, &[(500, 3)]);
@@ -514,8 +577,10 @@ mod tests {
         base.seedlings.insert(CROP, SEEDLING);
         let mut job = Job::new(7, Kind::Harvest);
         harvest(&base, GARDENER, &mut job);
-        assert_eq!(base.finished.borrow().as_slice(), &[CROP]);
-        assert!(job.status.starts_with("no "), "{}", job.status);
+        assert!(base.finished.borrow().is_empty(), "not removed");
+        assert_eq!((base.count(CROP, 500), base.count(CHEST, 500)), (3, 0), "not picked");
+        assert_eq!(job.peaks, vec![(SEEDLING, 1)], "the seedling it waits for is restocked");
+        assert!(job.status.contains("wait for"), "{}", job.status);
     }
 
     const SIMPLE_BAIT: u32 = 3151503945;

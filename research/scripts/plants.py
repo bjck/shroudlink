@@ -1,18 +1,42 @@
 """Crops for the assistants mod's gardener: which seedling replants a ripe crop.
 
-usage: python plants.py <farm.txt from the farm_dump EML mod> <out plants.tsv>
+usage: python plants.py <farm.txt from the farm_dump EML mod> <out plants.tsv> [croploot.txt]
 
 A ripe crop is the last growth stage of a plant root (`ecs::Upgrade.levels[].upgradeEntity`);
 it is told apart at runtime by the harvest it holds (`ecs::DefaultInventory.defaultInventory`).
-Rows: crop <harvest inventory guid> <seedling item id> <plant root> <stage count>
+Rows: crop <harvest inventory guid> <seedling item id> <plant root> <stage count> [harvest]
 Only plants whose last stage holds a harvest (crops, not trees) and that a seedling places.
+
+Some ripe stages are scatter loot (beans, pumpkins …): their `DefaultInventory` is applied
+only when a player picks them, so nothing is stored to take. With the `croploot_dump`
+export (`croploot.txt`) their row gets the harvest the inventory gives:
+item:count,item:count (stacks that always spawn, at their least count).
 """
+import re
 import sys
 from collections import defaultdict
 
 
+def loot_of(path):
+    """Harvest inventory guid -> 'item:count,...' from the croploot_dump export."""
+    loot = {}
+    for line in open(path, encoding="utf-8"):
+        if not line.startswith("INVENTORY "):
+            continue
+        guid = line.split()[1]
+        stacks = re.findall(r"countMax=(\d+) countMin=(\d+) item=\{value=(\d+)\}.*?spawnProbability=([\d.]+)", line)
+        # nested groups and selectors (random picks) are not reproduced: those crops stay manual
+        if "isSelector=true" in line or "groups=[]" not in line:
+            continue
+        sure = [f"{item}:{low}" for _, low, item, chance in stacks if float(chance) >= 1.0]
+        if sure:
+            loot[guid] = ",".join(sure)
+    return loot
+
+
 def main():
     dump, out_path = sys.argv[1:3]
+    loot = loot_of(sys.argv[3]) if len(sys.argv) > 3 else {}
     stages = defaultdict(list)  # root guid -> [(level, stage name, inventory guid)]
     names, seed_of = {}, {}
     for line in open(dump, encoding="utf-8"):
@@ -32,7 +56,10 @@ def main():
         # stages are scatter loot (beans: Scatter_Loot_…_Bean): the gardener only takes
         # those standing on a plant root, so wild scatter loot is never mistaken for a crop
         if root in seed_of and inventory and inventory not in others:
-            rows.append(f"crop\t{inventory}\t{seed_of[root]}\t{names[root]}\t{len(levels)}")
+            row = f"crop\t{inventory}\t{seed_of[root]}\t{names[root]}\t{len(levels)}"
+            if stage.startswith("Scatter_Loot") and inventory in loot:
+                row += f"\t{loot[inventory]}"
+            rows.append(row)
     # a ripe stage two plants share (cattails and papyrus) cannot tell which seedling it
     # needs: those stay for the players
     count = defaultdict(int)
@@ -41,7 +68,7 @@ def main():
     rows = [row for row in rows if count[row.split("\t")[1]] == 1]
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(rows) + "\n")
-    print(f"{len(rows)} crops")
+    print(f"{len(rows)} crops, {sum(r.count(chr(9)) > 4 for r in rows)} with a harvest made on picking")
 
 
 if __name__ == "__main__":

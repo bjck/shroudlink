@@ -170,6 +170,14 @@ From the reflection data (`server/.cache/types.json`) and the live component byt
   his forge. The state names in the binary are only the reflection table's; the AI code
   was not located.
 
+## Crops whose ripe stage is scatter loot
+
+Beans, thyme, shiitake, algae, yellow fog mushrooms, taro, pomegranates, reeds, pumpkins,
+ginger and daylilies end in a `Scatter_Loot_…` stage (`DestroyOnLoot`, on the plant root)
+whose `DefaultInventory` (+0x0 Guid, +0x10 keepOnRandomLoot, +0x11 applied) is applied only
+when a player picks it: its inventory stays empty. Their `DefaultInventoryResource`s
+(`croploot_dump`) give fixed stacks, all with probability 1 (a bean: 3 beans).
+
 ## Animal feeders and the build zone
 
 - A placed feeder is an `AnimalTarget` (live: `DynamicAnimalTarget`, 8 bytes, no type

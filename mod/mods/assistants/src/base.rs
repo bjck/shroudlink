@@ -125,6 +125,11 @@ mod level {
 }
 
 /// `ecs::DestroyOnLoot` (104 bytes): +0x40 isActive, +0x41 shouldDestroy.
+/// `ecs::DefaultInventory`: defaultInventory (Guid) at +0x0, keepOnRandomLoot +0x10
+mod default_inventory {
+    pub const APPLIED: usize = 0x11;
+}
+
 mod destroy_on_loot {
     pub const IS_ACTIVE: usize = 0x40;
     pub const SHOULD_DESTROY: usize = 0x41;
@@ -177,6 +182,12 @@ pub trait Base {
     fn remove(&self, entity: u32, slot: u64, count: u32) -> u32;
     /// The seedling that replants a ripe crop, if it is one the table knows.
     fn crop_seedling(&self, crop: u32) -> Option<u32>;
+    /// The harvest a ripe scatter-loot crop gives when picked, if it was not picked yet
+    /// (`ecs::DefaultInventory.applied`, +0x11, still 0).
+    fn crop_loot(&self, crop: u32) -> Option<Vec<(u32, u32)>>;
+    /// Marks such a crop picked (`applied` = 1), before its harvest is made: a crop that
+    /// stays (replanting failed) is never harvested twice.
+    fn mark_looted(&self, crop: u32) -> bool;
     /// Starts a ripe crop's plant over from its first growth stage (after its harvest was
     /// taken), as the game's growth does with each stage; false if that was not possible.
     fn replant(&self, crop: u32) -> bool;
@@ -398,6 +409,21 @@ impl Base for WorldBase<'_> {
     fn crop_seedling(&self, crop: u32) -> Option<u32> {
         let inventory = crate::fishing::guid_text(&self.world.component(crop, "DefaultInventory")?)?;
         crate::plants::crops().get(&inventory).map(|c| c.seedling)
+    }
+
+    fn crop_loot(&self, crop: u32) -> Option<Vec<(u32, u32)>> {
+        let d = self.world.component(crop, "DefaultInventory")?;
+        let harvest = &crate::plants::crops().get(&crate::fishing::guid_text(&d)?)?.harvest;
+        (*d.get(default_inventory::APPLIED)? == 0 && !harvest.is_empty()).then(|| harvest.clone())
+    }
+
+    fn mark_looted(&self, crop: u32) -> bool {
+        let Some(mut d) = self.world.component(crop, "DefaultInventory") else { return false };
+        if d.len() <= default_inventory::APPLIED {
+            return false;
+        }
+        d[default_inventory::APPLIED] = 1;
+        self.world.set_component(crop, "DefaultInventory", &d)
     }
 
     fn replant(&self, crop: u32) -> bool {

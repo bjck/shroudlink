@@ -11,6 +11,9 @@ const TABLE: &str = include_str!("../plants.tsv");
 pub struct Crop {
     pub seedling: u32,
     pub name: String,
+    /// for a ripe stage that is scatter loot (beans …): what picking it gives, (item,
+    /// count); its inventory is applied only then, so nothing is stored to take
+    pub harvest: Vec<(u32, u32)>,
 }
 
 /// Harvest inventory guid -> the crop.
@@ -24,7 +27,13 @@ pub fn crops() -> &'static HashMap<String, Crop> {
                 if p.len() < 4 || p[0] != "crop" {
                     return None;
                 }
-                Some((p[1].to_string(), Crop { seedling: p[2].parse().ok()?, name: p[3].into() }))
+                let harvest = p.get(5).map_or_else(Vec::new, |h| {
+                    h.split(',').filter_map(|s| {
+                        let (item, count) = s.split_once(':')?;
+                        Some((item.parse().ok()?, count.parse().ok()?))
+                    }).collect()
+                });
+                Some((p[1].to_string(), Crop { seedling: p[2].parse().ok()?, name: p[3].into(), harvest }))
             })
             .collect()
     })
@@ -40,5 +49,7 @@ mod tests {
         assert_eq!(corn.name, "T1_Plant_Growth_Corn");
         assert_eq!(crate::names::item(corn.seedling), "Seedling Grain Corn");
         assert_eq!(crops().len(), 36);
+        let bean = &crops()["18280ed9-7665-445f-ae97-8dadd3d820bb"];
+        assert_eq!((crate::names::item(bean.seedling).as_str(), bean.harvest.len()), ("Seedling Vegetable Bean", 1));
     }
 }

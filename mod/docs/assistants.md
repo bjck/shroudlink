@@ -112,8 +112,13 @@ notifications about their work (finished orders, sub-orders, harvests, catches).
   animals `IsTame`), which refill on their own. **Replanting**: an emptied crop is started
   over with one matching seedling from the chests (`plants.tsv`): the plant root's level is
   set to 0, and the game's own growth and upgrade systems grow it again from the first stage,
-  as they do while it grows. The seedling goes first and comes back if that fails; without a
-  seedling the crop is removed as in vanilla. No new plants are placed: only where one grew. **Seedlings in stock**:
+  as they do while it grows. The seedling goes first and comes back if that fails. A crop is
+  only picked when a seedling for it is in the chests: without one it stays ripe on its
+  field (picking would leave the soil empty) until the seedling restock below made some.
+  Crops whose ripe stage is scatter loot (beans, pumpkins, thyme …) hold nothing: their
+  `DefaultInventory` is applied only when picked, so the gardener marks them picked and
+  makes their harvest in the chests (the amounts are in `plants.tsv`, from
+  `research/scripts/eml/croploot_dump`). No new plants are placed: only where one grew. **Seedlings in stock**:
   the gardener remembers the most crops of a kind replanted (or left without a seedling)
   in one round, about the size of that field, and keeps that many plus 5 seedlings in the
   chests: when there are fewer, the Farmer orders the difference at a Seedbed nearby (an
@@ -183,5 +188,6 @@ Not verified: whether a stopped run refunds its inputs on cancel.
 - Working at the very station that makes the order (the game picks one of theirs), and a
   fishing animation for the fisher (findings in `docs/research/assistants.md`).
 - Cattails and papyrus: both end in the same ripe stage, so it cannot tell which seedling
-  replants it; they stay for the players. Crops whose ripe stage is scatter loot (beans,
-  pumpkins, thyme …) are in the table since Oct 2026, not yet seen harvested in game.
+  replants it; they stay for the players.
+- Notifications name items by their debug names ("Bad Vegetable Beans" for Aurora Beans):
+  the dedicated server has no localisation.
