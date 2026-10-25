@@ -160,6 +160,14 @@ pub(crate) fn dispatch(message: &Value) {
                 let mods = message.get("mods").and_then(Value::as_array).cloned().unwrap_or_default();
                 log!("shroudlink: connected, server mods: {}", Value::Array(mods.clone()));
                 with_link(|link| link.server_mods = mods.clone());
+                // the addon's version first: the server warns about an older addon by its absence
+                let ours = shroudlink::ui::UI_PROTOCOL;
+                send(json!({ "mod": "shroudlink", "op": "hello", "version": env!("CARGO_PKG_VERSION"), "ui_protocol": ours }));
+                let theirs = message.get("ui_protocol").and_then(Value::as_u64).unwrap_or(1) as u32;
+                if theirs < ours {
+                    log!("shroudlink: server speaks UI protocol {theirs}, addon {ours}");
+                    crate::ui::note("This server runs an older shroudlink: some mod windows may look wrong. Ask the server owner to update it.".into());
+                }
                 send(json!({ "mod": "shroudlink", "op": "ping", "echo": "hello from the client addon" }));
                 // mods that show players use it from the start, not only after the first chest
                 if let Some(name) = crate::steam::persona_name() {

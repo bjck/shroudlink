@@ -44,6 +44,8 @@ pub unsafe fn boxed(api: &crate::native::Api, frame: &mut Frame, fill: u32, rim:
 }
 
 const LINE: f32 = 30.0;
+/// A tab bar's height.
+const TAB: f32 = 46.0;
 const TITLE: f32 = 40.0;
 const DIVIDER: f32 = 14.0;
 const BUTTON: f32 = 40.0;
@@ -186,6 +188,18 @@ fn list_columns(entries: &[String]) -> Vec<f32> {
     widths
 }
 
+/// The buttons of a tab bar, the selected one lit; the index of a clicked one.
+unsafe fn tab_buttons(d: &mut super::Draw, scope: &str, tabs: &[String], selected: u32) -> Option<u32> {
+    let mut clicked = None;
+    for (i, label) in tabs.iter().enumerate() {
+        let k = key("shroudlinkPageTab", scope, i as u64);
+        if button(d, &k, label, label_width(label).max(120.0), TAB - 4.0, i as u32 == selected) {
+            clicked = Some(i as u32);
+        }
+    }
+    clicked
+}
+
 /// The gold divider, `width` wide.
 unsafe fn divider(d: &mut super::Draw, key: &UiStr, width: f32) {
     let api = d.api;
@@ -246,6 +260,11 @@ unsafe fn draw_inline(d: &mut super::Draw, owner: &str, window: &str, node: &mut
         }
         Node::List { entries, .. } => api.text(&entries.join(" / "), STYLE_TAB_TEXT),
         Node::ItemGrid { items, .. } => api.text(&format!("{} items", items.len()), STYLE_TAB_TEXT),
+        Node::Tabs { id, tabs, selected } => {
+            if let Some(i) = tab_buttons(d, &format!("{scope}/{id}"), tabs, *selected) {
+                event(id, Event::Click { index: Some(i) });
+            }
+        }
     }
 }
 
@@ -343,6 +362,20 @@ unsafe fn draw_pieces(d: &mut super::Draw, owner: &str, window: &str, title: &st
                         if item.count > 1 { format!("{name} ×{}", item.count) } else { name }
                     });
                     api.text(&name.unwrap_or_default(), STYLE_TAB_TEXT);
+                }
+            }
+            Node::Tabs { id, tabs, selected } => {
+                if view.take(TAB) {
+                    let mut row = Frame::new();
+                    api.open_row(&mut row, &key("shroudlinkPageTabs", &path, 0), 6.0);
+                    api.set_size(&row, width, TAB);
+                    if let Some(i) = tab_buttons(d, &format!("{scope}/{id}"), tabs, *selected) {
+                        events.push((owner.to_owned(), UiEvent { window: window.to_owned(), node: id.clone(), event: Event::Click { index: Some(i) } }));
+                    }
+                    api.close_frame(&mut row);
+                }
+                if view.take(DIVIDER) {
+                    divider(d, &key("shroudlinkPageTabsLine", &path, 0), width);
                 }
             }
             Node::Row { children } => {

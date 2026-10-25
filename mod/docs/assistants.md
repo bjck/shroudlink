@@ -73,7 +73,10 @@ Status shown in the window: working, needs <items>, waiting for <items> (being m
 needs water (place a Well), the station needs power, no room in the chests, <station> is
 making <item>, no station for it nearby, waiting until someone is at the base, done.
 
-The window lists open orders with their sub-orders, then the last finished ones; clicking
+A survivor's window has tabs: Orders (stations, products, ordering, the orders), Jobs
+(their standing jobs with status and, for the fisher, the bait order), Crops (gardeners:
+per crop kind how many are ripe or waiting for a seedling, the seedlings in stock and how
+many they keep) and Notifications. The window lists open orders with their sub-orders, then the last finished ones; clicking
 an open order cancels it, clicking a finished one clears it ("Clear finished" clears all).
 Feedback on a click shows under the order row and as a notification.
 

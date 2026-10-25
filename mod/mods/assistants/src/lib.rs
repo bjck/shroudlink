@@ -70,6 +70,9 @@ struct View {
     page: usize,
     /// the baits the fisher's window lists, in its order
     baits: Vec<u32>,
+    /// the tab shown, and the tabs offered (for their click indices)
+    tab: Tab,
+    tabs: Vec<Tab>,
 }
 
 /// Amounts the quick buttons order.
@@ -172,6 +175,148 @@ fn order_line(o: &Order) -> String {
     format!("{} {}/{} - {}", names::item(o.product), o.produced.min(o.amount), o.amount, status)
 }
 
+/// The tabs of a survivor's window.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Tab {
+    #[default]
+    Orders,
+    Jobs,
+    Crops,
+    Notifications,
+}
+
+impl Tab {
+    fn label(self) -> &'static str {
+        match self {
+            Tab::Orders => "Orders",
+            Tab::Jobs => "Jobs",
+            Tab::Crops => "Crops",
+            Tab::Notifications => "Notifications",
+        }
+    }
+}
+
+/// Items in the chests around an entity.
+fn stock_near(base: &dyn Base, entity: u32) -> HashMap<u32, u32> {
+    let mut stock: HashMap<u32, u32> = HashMap::new();
+    for slot in base.chests_near(entity, work::RADIUS).into_iter().flat_map(|c| base.slots(c)) {
+        *stock.entry(slot.item).or_default() += slot.count;
+    }
+    stock
+}
+
+/// The Crops tab: per kind of crop around the gardener, how many are ripe (or picked and
+/// waiting for a seedling), the seedlings in the chests and how many they keep.
+fn crops_tab(base: &dyn Base, entity: u32, job: Option<&Job>) -> Vec<Node> {
+    let mut nodes = Vec::new();
+    let stock = stock_near(base, entity);
+    // seedling -> (ripe, picked and waiting)
+    let mut kinds: Vec<(u32, u32, u32)> = Vec::new();
+    for (crop, kind) in base.harvestables_near(entity, work::RADIUS) {
+        if kind != base::Harvest::Crop {
+            continue;
+        }
+        let Some(seedling) = base.crop_seedling(crop) else { continue };
+        let waiting = base.crop_picked(crop) as u32;
+        match kinds.iter_mut().find(|k| k.0 == seedling) {
+            Some(k) => {
+                k.1 += 1 - waiting;
+                k.2 += waiting;
+            }
+            None => kinds.push((seedling, 1 - waiting, waiting)),
+        }
+    }
+    for &(seedling, _) in job.map_or(&[][..], |j| &j.peaks[..]) {
+        if !kinds.iter().any(|k| k.0 == seedling) {
+            kinds.push((seedling, 0, 0));
+        }
+    }
+    let growing = base.growing_near(entity, work::RADIUS).len();
+    nodes.push(Node::Text { text: format!("{growing} plant(s) growing around them. Ripe crops are picked when a seedling is there to replant them.") });
+    if kinds.is_empty() {
+        nodes.push(Node::Text { text: "No ripe crops around them right now.".into() });
+        return nodes;
+    }
+    kinds.sort_by_key(|k| names::item(k.0));
+    let keep = |seedling: u32| job.and_then(|j| j.peaks.iter().find(|p| p.0 == seedling)).map(|p| p.1 + jobs::SEEDLING_RESERVE);
+    let entries = kinds
+        .iter()
+        .map(|&(seedling, ripe, waiting)| {
+            let crop = names::item(seedling).trim_start_matches("Seedling ").to_string();
+            let state = match (ripe, waiting) {
+                (0, 0) => "none ripe".to_string(),
+                (r, 0) => format!("{r} ripe"),
+                (0, w) => format!("{w} picked, waiting to be replanted"),
+                (r, w) => format!("{r} ripe, {w} waiting"),
+            };
+            let have = stock.get(&seedling).copied().unwrap_or(0);
+            let seedlings = match keep(seedling) {
+                Some(k) => format!("{have} seedlings (keeps {k})"),
+                None => format!("{have} seedlings"),
+            };
+            format!("{crop}\t{state}\t{seedlings}")
+        })
+        .collect();
+    nodes.push(Node::List { id: "crops".into(), entries });
+    nodes
+}
+
+/// The Orders tab: their stations, the products, ordering, the orders.
+fn orders_tab(orders: &Orders, base: &WorldBase, entity: u32, npc_id: u32, view: &mut View, content: &mut Vec<Node>) {
+    let t = table();
+    let here = stations_here(base, entity, npc_id);
+    let names: Vec<String> = here.iter().filter_map(|w| t.station(*w)).map(|s| names::pretty(&s.name)).collect();
+    content.push(Node::Text {
+        text: match names.len() {
+            0 => "None of their stations stands within 40 m.".into(),
+            1..=3 => format!("Stations: {}", names.join(", ")),
+            n => format!("{n} stations: {} ...", names[..3].join(", ")),
+        },
+    });
+    view.products = t.products_of(npc_id).into_iter().filter(|(_, rs)| rs.iter().any(|r| here.contains(&r.workshop))).map(|(item, _)| item).collect();
+    if !view.products.is_empty() {
+        let pages = view.products.len().div_ceil(PAGE);
+        view.page = view.page.min(pages - 1);
+        let shown = &view.products[view.page * PAGE..((view.page + 1) * PAGE).min(view.products.len())];
+        let items = shown.iter().map(|&p| Item { id: p, count: recipe_for(base, entity, npc_id, p).map_or(1, |r| r.makes(p)) }).collect();
+        content.push(Node::ItemGrid { id: "products".into(), columns: 8, items });
+        if pages > 1 {
+            content.push(Node::Row {
+                children: vec![
+                    Node::Button { id: "prev".into(), label: "«".into() },
+                    Node::Text { text: format!("{} of {pages}", view.page + 1) },
+                    Node::Button { id: "next".into(), label: "»".into() },
+                ],
+            });
+        }
+        content.push(Node::Text {
+            text: match view.product.and_then(|p| Some((p, recipe_for(base, entity, npc_id, p)?))) {
+                Some((p, r)) => format!("{}: {} per run, {:.0} s a run", names::item(p), r.makes(p), r.seconds),
+                None => "Click what they should make.".into(),
+            },
+        });
+        let mut row: Vec<Node> = QUICK.iter().map(|n| Node::Button { id: format!("make{n}"), label: format!("Make {n}") }).collect();
+        row.push(Node::TextInput { id: "amount".into(), value: view.amount.clone(), hint: "how many".into() });
+        row.push(Node::Button { id: "order".into(), label: "Order".into() });
+        content.push(Node::Row { children: row });
+    }
+    // open orders, each followed by the sub-orders making its ingredients
+    let mut listed: Vec<&Order> = Vec::new();
+    for top in orders.of(npc_id).filter(|o| !o.done() && o.parent.is_none()) {
+        listed.push(top);
+        listed.extend(orders.children(top.id).iter().filter_map(|id| orders.list.iter().find(|o| o.id == *id)));
+    }
+    let done: Vec<&Order> = orders.of(npc_id).filter(|o| o.done()).collect();
+    listed.extend(done.into_iter().rev().take(5));
+    view.listed = listed.iter().map(|o| o.id).collect();
+    if !listed.is_empty() {
+        content.push(Node::Heading { text: "Orders".into() });
+        let line = |o: &Order| if o.parent.is_some() { format!("  > {}", order_line(o)) } else { order_line(o) };
+        content.push(Node::List { id: "orders".into(), entries: listed.iter().map(|o| line(o)).collect() });
+        content.push(Node::Text { text: "Click an open order to cancel it, a finished one to clear it.".into() });
+    }
+}
+
 impl Assistants {
     fn window(&mut self, host: &Host, client: u64) -> ToClient {
         let world = host.world();
@@ -207,84 +352,53 @@ impl Assistants {
             }
             (Some((entity, npc_id)), Some(_)) => {
                 let t = table();
-                content.push(Node::Toggle { id: "notify".into(), label: "Notifications about their work".into(), value: !self.orders.muted.contains(&npc_id) });
-                for kind in jobs::kinds_for(npc_id) {
-                    let job = self.orders.jobs.iter().find(|j| j.npc == npc_id && j.kind == kind);
-                    content.push(Node::Toggle { id: kind.name().into(), label: job_label(kind).into(), value: job.is_some() });
-                    if let Some(job) = job {
-                        content.push(Node::Text { text: job_line(job) });
-                        if kind == Kind::Fish {
-                            content.push(Node::Button { id: "fish_here".into(), label: "Fish here (where you stand)".into() });
-                            // the baits in the order they are used, with what the chests hold
-                            let chests = base.chests_near(entity, work::RADIUS);
-                            let mut stock: HashMap<u32, u32> = HashMap::new();
-                            for slot in chests.iter().flat_map(|&c| base.slots(c)) {
-                                *stock.entry(slot.item).or_default() += slot.count;
+                let kinds = jobs::kinds_for(npc_id);
+                let mut tabs: Vec<Tab> = Vec::new();
+                if t.stations_of(npc_id).next().is_some() {
+                    tabs.push(Tab::Orders);
+                }
+                if !kinds.is_empty() {
+                    tabs.push(Tab::Jobs);
+                }
+                if kinds.contains(&Kind::Harvest) {
+                    tabs.push(Tab::Crops);
+                }
+                tabs.push(Tab::Notifications);
+                let tab = if tabs.contains(&view.tab) { view.tab } else { tabs[0] };
+                view.tab = tab;
+                view.tabs = tabs.clone();
+                content.push(Node::Tabs { id: "tabs".into(), tabs: tabs.iter().map(|t| t.label().to_string()).collect(), selected: tabs.iter().position(|&x| x == tab).unwrap_or(0) as u32 });
+                content.extend(message.clone());
+                match tab {
+                    Tab::Orders => orders_tab(&self.orders, &base, entity, npc_id, view, &mut content),
+                    Tab::Jobs => {
+                        for &kind in &kinds {
+                            let job = self.orders.jobs.iter().find(|j| j.npc == npc_id && j.kind == kind);
+                            content.push(Node::Toggle { id: kind.name().into(), label: job_label(kind).into(), value: job.is_some() });
+                            let Some(job) = job else { continue };
+                            content.push(Node::Text { text: job_line(job) });
+                            if kind == Kind::Fish {
+                                content.push(Node::Button { id: "fish_here".into(), label: "Fish here (where you stand)".into() });
+                                // the baits in the order they are used, with what the chests hold
+                                let stock = stock_near(&base, entity);
+                                let order = jobs::bait_order(&job.baits);
+                                // icons and the game's names in the tooltip; the number is the stock
+                                let items = order.iter().map(|&b| Item { id: b, count: stock.get(&b).copied().unwrap_or(0) }).collect();
+                                content.push(Node::Heading { text: "Bait order".into() });
+                                content.push(Node::Text { text: "They use the first of these baits that is in the chests, from left to right. Click a bait to use it first.".into() });
+                                content.push(Node::ItemGrid { id: "baits".into(), columns: 8, items });
+                                view.baits = order;
                             }
-                            let order = jobs::bait_order(&job.baits);
-                            // icons and the game's names in the tooltip; the number is the stock
-                            let items = order.iter().map(|&b| Item { id: b, count: stock.get(&b).copied().unwrap_or(0) }).collect();
-                            content.push(Node::Heading { text: "Bait order".into() });
-                            content.push(Node::Text { text: "They use the first of these baits that is in the chests, from left to right. Click a bait to use it first.".into() });
-                            content.push(Node::ItemGrid { id: "baits".into(), columns: 8, items });
-                            view.baits = order;
                         }
                     }
-                }
-                let here = stations_here(&base, entity, npc_id);
-                let names: Vec<String> = here.iter().filter_map(|w| t.station(*w)).map(|s| names::pretty(&s.name)).collect();
-                if t.stations_of(npc_id).next().is_some() {
-                    content.push(Node::Text {
-                        text: match names.len() {
-                            0 => "None of their stations stands within 40 m.".into(),
-                            1..=3 => format!("Stations: {}", names.join(", ")),
-                            n => format!("{n} stations: {} ...", names[..3].join(", ")),
-                        },
-                    });
-                }
-                let workshop = npc_id;
-                view.products = t.products_of(workshop).into_iter().filter(|(_, rs)| rs.iter().any(|r| here.contains(&r.workshop))).map(|(item, _)| item).collect();
-                if !view.products.is_empty() {
-                    let pages = view.products.len().div_ceil(PAGE);
-                    view.page = view.page.min(pages - 1);
-                    let shown = &view.products[view.page * PAGE..((view.page + 1) * PAGE).min(view.products.len())];
-                    let items = shown.iter().map(|&p| Item { id: p, count: recipe_for(&base, entity, npc_id, p).map_or(1, |r| r.makes(p)) }).collect();
-                    content.push(Node::ItemGrid { id: "products".into(), columns: 8, items });
-                    if pages > 1 {
-                        content.push(Node::Row {
-                            children: vec![
-                                Node::Button { id: "prev".into(), label: "«".into() },
-                                Node::Text { text: format!("{} of {pages}", view.page + 1) },
-                                Node::Button { id: "next".into(), label: "»".into() },
-                            ],
-                        });
+                    Tab::Crops => {
+                        let job = self.orders.jobs.iter().find(|j| j.npc == npc_id && j.kind == Kind::Harvest);
+                        content.extend(crops_tab(&base, entity, job));
                     }
-                    content.push(Node::Text {
-                        text: match view.product.and_then(|p| Some((p, recipe_for(&base, entity, npc_id, p)?))) {
-                            Some((p, r)) => format!("{}: {} per run, {:.0} s a run", names::item(p), r.makes(p), r.seconds),
-                            None => "Click what they should make.".into(),
-                        },
-                    });
-                    let mut row: Vec<Node> = QUICK.iter().map(|n| Node::Button { id: format!("make{n}"), label: format!("Make {n}") }).collect();
-                    row.push(Node::TextInput { id: "amount".into(), value: view.amount.clone(), hint: "how many".into() });
-                    row.push(Node::Button { id: "order".into(), label: "Order".into() });
-                    content.push(Node::Row { children: row });
-                }
-                content.extend(message.clone());
-                // open orders, each followed by the sub-orders making its ingredients
-                let mut listed: Vec<&Order> = Vec::new();
-                for top in self.orders.of(npc_id).filter(|o| !o.done() && o.parent.is_none()) {
-                    listed.push(top);
-                    listed.extend(self.orders.children(top.id).iter().filter_map(|id| self.orders.list.iter().find(|o| o.id == *id)));
-                }
-                let done: Vec<&Order> = self.orders.of(npc_id).filter(|o| o.done()).collect();
-                listed.extend(done.into_iter().rev().take(5));
-                view.listed = listed.iter().map(|o| o.id).collect();
-                if !listed.is_empty() {
-                    content.push(Node::Heading { text: "Orders".into() });
-                    let line = |o: &Order| if o.parent.is_some() { format!("  > {}", order_line(o)) } else { order_line(o) };
-                    content.push(Node::List { id: "orders".into(), entries: listed.iter().map(|o| line(o)).collect() });
-                    content.push(Node::Text { text: "Click an open order to cancel it, a finished one to clear it.".into() });
+                    Tab::Notifications => {
+                        content.push(Node::Toggle { id: "notify".into(), label: "Notifications about their work".into(), value: !self.orders.muted.contains(&npc_id) });
+                        content.push(Node::Text { text: "Finished orders, sub-orders, harvests, catches and fed animals. Your own clicks are always answered.".into() });
+                    }
                 }
                 (npc_name(npc_id), "npc")
             }
@@ -617,6 +731,11 @@ impl Mod for Assistants {
                     self.views.entry(client).or_default().message = Some("The fisher will fish here.".into());
                 }
             }
+            ("tabs", Event::Click { index: Some(i) }) => {
+                if let Some(&tab) = view.tabs.get(i as usize) {
+                    view.tab = tab;
+                }
+            }
             ("baits", Event::Click { index: Some(i) }) => {
                 let order = view.baits.clone();
                 if let (Some(&bait), Some((_, npc))) = (order.get(i as usize), view.npc) {
@@ -751,6 +870,29 @@ mod tests {
         m.views.get_mut(&1).unwrap().listed = vec![open, done];
         click(&mut m, &mut host, "orders", Event::Click { index: Some(1) });
         assert_eq!(m.orders.list.iter().map(|o| o.id).collect::<Vec<_>>(), vec![open]);
+    }
+
+    #[test]
+    fn the_farmer_window_has_tabs_and_a_click_switches_them() {
+        let mut m = Assistants::default();
+        let mut host = MockHost::default();
+        m.on_join(&mut host.host(), 1);
+        m.views.get_mut(&1).unwrap().npc = Some((50, jobs::FARMER_WORKSHOP));
+        host.set_player(7);
+        let open = |m: &mut Assistants, host: &mut MockHost, ev: UiEvent| {
+            m.on_message(&mut host.host(), 1, &ev.to_message(ID));
+            host.take_sent().into_iter().map(|s| s.1).find(|s| s["op"] == "open").expect("a window")
+        };
+        let w = open(&mut m, &mut host, UiEvent { window: "npc".into(), node: "refresh".into(), event: Event::Click { index: None } });
+        let tabs = &w["window"]["content"][0];
+        assert_eq!(tabs["type"], "tabs");
+        let labels: Vec<&str> = tabs["tabs"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
+        assert_eq!(labels, ["Orders", "Jobs", "Crops", "Notifications"]);
+        assert_eq!(tabs["selected"], 0);
+        // the notifications tab holds the switch
+        let w = open(&mut m, &mut host, UiEvent { window: "npc".into(), node: "tabs".into(), event: Event::Click { index: Some(3) } });
+        assert_eq!(w["window"]["content"][0]["selected"], 3);
+        assert!(w["window"]["content"].to_string().contains("\"id\":\"notify\""));
     }
 
     #[test]

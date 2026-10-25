@@ -152,13 +152,19 @@ Windows are trees of nodes (`link/src/ui.rs`), drawn with the game's widgets:
 | `row` | children side by side | – |
 | `button` | framed button, lit under the cursor | `click` |
 | `toggle` | ON / OFF switch and label | `change {value}` |
-| `list` | clickable rows; tab-separated cells line up in columns (addon 0.6+) | `click {index}` |
+| `list` | clickable rows; tab-separated cells line up in columns | `click {index}` |
+| `tabs` | a tab bar along the top (`tabs`, `selected`); send the selected tab's content after it | `click {index}` |
 | `item_grid` | real inventory slots (icon, rarity) with the game's item tooltip | `click {index}` |
 | `text_input` | framed field; click to type (keyboard is kept from the game) | `change {value}` on every edit (addon 0.6+), `submit {value}` on Enter |
 
 Labels must not contain `<`: the game's text starts a markup tag there and draws nothing
 after it (use « and »). A button next to a text field (Order) gets the typed text from the
 `change` events, as `submit` only comes with Enter.
+
+**UI protocol** (`shroudlink::ui::UI_PROTOCOL`, now 2 = addon and server 0.6): the
+welcome carries it, the addon answers `{"mod":"shroudlink","op":"hello","version":…,"ui_protocol":…}`.
+Version 2 broke older addons (`tabs` nodes, text-field `change`): an addon without `hello`
+is told on screen to update, and a newer addon on an older server says so too.
 
 Messages: server → client `{"mod":"ui","op":"open"|"close"|"entries", "owner": ...}`;
 client → server `{"mod":"<owner>","op":"ui_event","event":{"window","node","event"}}`.

@@ -227,12 +227,22 @@ pub(crate) fn ids() -> Vec<String> {
     with_mods(|mods| mods.iter().map(|m| m.id().to_owned()).collect())
 }
 
+/// Addons that sent their `hello` (UI protocol 2 and newer), with their version.
+static GREETED: Mutex<Vec<(ClientId, String)>> = Mutex::new(Vec::new());
+
+/// Tells the player on the addon's screen (any addon shows `notify`).
+fn tell_player(host: &mut Host, client: ClientId, text: &str) {
+    host.send(client, &shroudlink::ui::ToClient::Notify { owner: "shroudlink".into(), text: text.into() }.to_message());
+}
+
 pub(crate) fn join(host: &mut Host, client: ClientId) {
     // a new or reloaded addon knows no layout until its chest screen draws one
     LAYOUTS.lock().unwrap_or_else(|e| e.into_inner()).retain(|(c, _)| *c != client);
+    // the welcome is answered with a hello again
+    GREETED.lock().unwrap_or_else(|e| e.into_inner()).retain(|(c, _)| *c != client);
     with_mods(|mods| {
         let list: Vec<Value> = mods.iter().map(|m| m.describe()).collect();
-        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id(), "features": crate::hooks::working() }));
+        host.send(client, &json!({ "mod": "shroudlink", "op": "welcome", "mods": list, "server": server_id(), "features": crate::hooks::working(), "ui_protocol": shroudlink::ui::UI_PROTOCOL }));
         for m in mods.iter_mut() {
             m.on_join(host, client);
         }
@@ -255,7 +265,23 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
     };
     if target == "shroudlink" {
         match message.get("op").and_then(Value::as_str) {
-            Some("ping") => host.send(client, &json!({ "mod": "shroudlink", "op": "pong", "echo": message.get("echo") })),
+            Some("hello") => {
+                let version = message.get("version").and_then(Value::as_str).unwrap_or("?").to_string();
+                let theirs = message.get("ui_protocol").and_then(Value::as_u64).unwrap_or(1) as u32;
+                log!("shroudlink: client {:016x} is addon {version}, UI protocol {theirs}", client.0);
+                if theirs < shroudlink::ui::UI_PROTOCOL {
+                    tell_player(host, client, &format!("The server's mods need a newer shroudlink addon (you have {version}): some windows will not show. Please update the addon."));
+                }
+                GREETED.lock().unwrap_or_else(|e| e.into_inner()).push((client, version));
+            }
+            Some("ping") => {
+                // an addon older than UI protocol 2 pings without a hello first
+                if !GREETED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|(c, _)| *c == client) {
+                    log!("shroudlink: client {:016x} is an addon older than 0.6 (no hello)", client.0);
+                    tell_player(host, client, "This server's mods need shroudlink addon 0.6 or newer: some windows will not show. Please update the addon.");
+                }
+                host.send(client, &json!({ "mod": "shroudlink", "op": "pong", "echo": message.get("echo") }));
+            }
             // a reloaded addon continues its session and wants the welcome again
             Some("hello_again") => join(host, client),
             Some("identify") => {

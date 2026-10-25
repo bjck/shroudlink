@@ -30,6 +30,14 @@ pub struct Window {
     pub content: Vec<Node>,
 }
 
+/// Version of the messages and windows (above the transport's `PROTOCOL_VERSION`). The
+/// server sends it in its welcome, the addon in its `hello`; both sides warn the player
+/// when they differ. A new version may break the other side:
+/// - 1: addon 0.5 and older (no `hello`)
+/// - 2: addon and server 0.6: `tabs` nodes, `change` from text fields, tab-separated
+///   list columns
+pub const UI_PROTOCOL: u32 = 2;
+
 /// An item as the game identifies it (`keen::ItemStack`).
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Item {
@@ -50,8 +58,12 @@ pub enum Node {
     Toggle { id: String, label: String, value: bool },
     /// Item slots drawn like inventory slots (icon, count, tooltip); `click` reports the index.
     ItemGrid { id: String, columns: u8, items: Vec<Item> },
-    /// Selectable text rows; `click` reports the index.
+    /// Selectable text rows; `click` reports the index. Tab-separated cells line up in
+    /// columns.
     List { id: String, entries: Vec<String> },
+    /// A tab bar along the top of a window; `click` reports the index of the tab. The mod
+    /// sends the content of the selected tab after it.
+    Tabs { id: String, tabs: Vec<String>, selected: u32 },
 }
 
 /// A line of a HUD panel: label on the left, value on the right, over a bar filled to

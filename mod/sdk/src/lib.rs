@@ -643,6 +643,13 @@ pub mod testing {
         sent: Box<Vec<(u64, Value)>>,
     }
 
+    impl MockHost {
+        /// Makes every client the player `entity` (for windows that need the player).
+        pub fn set_player(&mut self, entity: u32) {
+            PLAYER.with(|p| p.set(entity));
+        }
+    }
+
     unsafe extern "C" fn send(ctx: *mut c_void, client: u64, json: *const u8, len: usize) {
         if let (Some(sent), Ok(value)) = ((ctx as *mut Vec<(u64, Value)>).as_mut(), serde_json::from_slice(std::slice::from_raw_parts(json, len))) {
             sent.push((client, value));
@@ -675,8 +682,12 @@ pub mod testing {
     unsafe extern "C" fn teleport(_: u32, _: f64, _: f64, _: f64) -> bool {
         false
     }
+    std::thread_local! {
+        /// The player entity every client is (`MockHost::set_player`; 0: none).
+        static PLAYER: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
     unsafe extern "C" fn player_of(_: u64) -> u32 {
-        0
+        PLAYER.with(|p| p.get())
     }
     unsafe extern "C" fn read_component(_: u32, _: u32, _: *mut u8, _: usize) -> usize {
         0

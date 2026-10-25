@@ -23,7 +23,8 @@ ToClient::Close { owner: "my_mod".into(), id: "main".into() }
 | `Button { id, label }` | `Click` |
 | `Toggle { id, label, value }` (an ON / OFF switch) | `Change { value: bool }` |
 | `TextInput { id, value, hint }` | `Change { value }` on every edit (addon 0.6+), `Submit { value }` on Enter |
-| `List { id, entries }` (flows into columns of 6) | `Click { index }` |
+| `List { id, entries }` (tab-separated cells line up in columns) | `Click { index }` |
+| `Tabs { id, tabs, selected }` (a tab bar; send the selected tab's content after it) | `Click { index }` |
 | `ItemGrid { id, columns, items: [Item { id, count }] }` (real item slots with icons and tooltips) | `Click { index }` |
 
 Events arrive in `on_message`:

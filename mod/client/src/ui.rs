@@ -447,6 +447,14 @@ pub fn after_panel_header(api: &Api, index: u8) {
 }
 
 /// HUD messages from mods, top centre, newest last.
+/// A message of the addon itself, shown like a mod's.
+pub fn note(text: String) {
+    let mut ui = UI.lock().unwrap();
+    let excess = ui.notes.len().saturating_sub(NOTES_MAX - 1);
+    ui.notes.drain(..excess);
+    add_note(&mut ui.notes, text);
+}
+
 /// Adds a toast; the same message again replaces the older one and counts: "… (×2)".
 fn add_note(notes: &mut Vec<(String, Instant)>, text: String) {
     let repeats = |shown: &str| -> Option<u32> {
@@ -840,7 +848,7 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
 
 fn node_height(node: &Node) -> f32 {
     match node {
-        Node::Text { .. } | Node::Button { .. } | Node::Toggle { .. } | Node::TextInput { .. } => TEXT_HEIGHT,
+        Node::Text { .. } | Node::Button { .. } | Node::Toggle { .. } | Node::TextInput { .. } | Node::Tabs { .. } => TEXT_HEIGHT,
         Node::Heading { .. } => TITLE_HEIGHT,
         Node::Separator => SEPARATOR_HEIGHT,
         Node::Row { children } => children.iter().map(node_height).fold(TEXT_HEIGHT, f32::max),
@@ -883,6 +891,18 @@ unsafe fn draw_node(d: &mut Draw, owner: &str, window: &str, path: &str, node: &
             if api.text_button(&format!("[ {label} ]"), STYLE_TAB_TEXT, ident("shroudlinkButton", &format!("{owner}/{window}/{id}"), 0).id()) {
                 event(id, Event::Click { index: None });
             }
+        }
+        // a backpack section has no room for tabs: the tab names as buttons in a row
+        Node::Tabs { id, tabs, selected } => {
+            let mut row = Frame::new();
+            api.open_row(&mut row, &ident("shroudlinkTabs", &scope, 0), 12.0);
+            for (i, tab) in tabs.iter().enumerate() {
+                let label = if i as u32 == *selected { format!("» {tab} «") } else { tab.clone() };
+                if api.text_button(&label, STYLE_TAB_TEXT, ident("shroudlinkTab", &format!("{owner}/{window}/{id}"), i as u64).id()) {
+                    event(id, Event::Click { index: Some(i as u32) });
+                }
+            }
+            api.close_frame(&mut row);
         }
         Node::Toggle { id, label, value } => {
             // the game font has no check box glyphs

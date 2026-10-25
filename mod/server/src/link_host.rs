@@ -393,6 +393,22 @@ mod tests {
         assert_eq!(welcome[0]["mod"], "shroudlink");
         assert_eq!(welcome[0]["op"], "welcome");
         assert!(welcome[0]["mods"].as_array().unwrap().iter().any(|m| m["id"] == "echo"));
+        assert_eq!(welcome[0]["ui_protocol"], shroudlink::ui::UI_PROTOCOL);
+
+        // an addon that pings without its hello first is older than 0.6: it is told to update
+        let send = |host: &mut Host, msg: u32, value: serde_json::Value| {
+            for packet in split_message(nonce, msg, &serde_json::to_vec(&value).unwrap()) {
+                host.receive_packet(packet.as_bytes());
+            }
+        };
+        send(&mut host, 100, serde_json::json!({ "mod": "shroudlink", "op": "ping" }));
+        let old = messages(&drain(&mut host, 3, 7), nonce);
+        assert!(old.iter().any(|m| m["op"] == "notify" && m["text"].as_str().unwrap().contains("0.6")), "{old:?}");
+        // with its hello it is not
+        send(&mut host, 101, serde_json::json!({ "mod": "shroudlink", "op": "hello", "version": "0.6.0", "ui_protocol": shroudlink::ui::UI_PROTOCOL }));
+        send(&mut host, 102, serde_json::json!({ "mod": "shroudlink", "op": "ping" }));
+        let new = messages(&drain(&mut host, 3, 7), nonce);
+        assert!(new.iter().all(|m| m["op"] != "notify"), "{new:?}");
 
         // a large chunked message reaches the mod and its answer comes back
         let text = "x".repeat(1000);

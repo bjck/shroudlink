@@ -90,8 +90,11 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
 - The addon is generic: features are server-mod logic on its building blocks (slot keys,
   marks, store, layout, windows). Add a client building block only when no mod can express
   the feature with the existing ones; the item search is the one client-only feature.
-- A new addon with an old server (or the reverse) must keep working: chestsort still accepts
-  the old addon's `"op":"locks"` message.
+- Addon and server agree on `UI_PROTOCOL` (`link/src/ui.rs`): the server sends it in its
+  welcome, the addon answers with `hello` (version, protocol); an addon without `hello` is
+  older than 0.6 and is told to update. New node kinds or message meanings bump it and may
+  break the other side (0.6 did: `tabs`); say so in the commit and the release notes.
+  chestsort still accepts the old addon's `"op":"locks"` message.
 - `FUN_1401ad1c0(out, ctx, to, from, feedback)` (quick stack) runs in **both
   directions**: chest → player too. Mods get `InventoryEvent { from, to }` and must check
   `game.is_player(from)`. The R button ("move all") is `FUN_1401ad940(out, ctx, from, to, ..)`.
