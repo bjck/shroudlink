@@ -344,9 +344,11 @@ impl Api {
     /// An inventory slot showing `count` x `item` (icon, rarity frame): (clicked, mouse over
     /// it). The game's own tooltip needs the inventory screen's context and does not show.
     pub unsafe fn item_slot(&self, item: u32, count: u32, size: f32) -> (bool, bool) {
-        // client inventory slot record (0x48 bytes): slot id (0 = none), then the item stack
+        // client inventory slot record (0x48 bytes): slot id (0 = none), item id at +0x8,
+        // stack count at +0x10 (the slot's render reads it there for the number)
         let mut slot = [0u64; 9];
-        slot[1] = item as u64 | (count as u64) << 32;
+        slot[1] = item as u64;
+        slot[2] = count as u64;
         let mut desc = Obj::<0x200>::new();
         (self.slot_desc_init)(desc.ptr());
         let mut highlight = 0u8;
