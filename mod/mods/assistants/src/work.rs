@@ -41,14 +41,33 @@ fn input_items(table: &Table, recipe: &Recipe) -> Vec<u32> {
     items
 }
 
-/// Moves a stack into the chests, those already holding the item first. Returns the
-/// number of items moved.
+/// The chests in the order an item goes into them, as chestsort sorts: those whose name
+/// asks for it, then those already holding it, then those without a category in their
+/// name; chests named for other categories only when nothing else has room. Within a
+/// rank, the ones holding it first.
+pub(crate) fn storage_order(base: &dyn Base, item: u32, chests: &[u32]) -> Vec<u32> {
+    let mut ranked: Vec<(u8, u32)> = chests
+        .iter()
+        .map(|&c| {
+            let holds = base.slots(c).iter().any(|s| s.item == item && s.count != 0);
+            let rank = match (base.chest_accepts(c, item), holds) {
+                (Some(true), true) => 0,
+                (Some(true), false) => 1,
+                (_, true) => 2,
+                (None, false) => 3,
+                (Some(false), false) => 4,
+            };
+            (rank, c)
+        })
+        .collect();
+    ranked.sort_by_key(|r| r.0);
+    ranked.into_iter().map(|r| r.1).collect()
+}
+
+/// Moves a stack into the chests, in [`storage_order`]. Returns the number of items moved.
 pub(crate) fn deposit(base: &dyn Base, from: u32, slot: u64, item: u32, count: u32, chests: &[u32]) -> u32 {
-    let holds = |c: u32| base.slots(c).iter().any(|s| s.item == item && s.count != 0);
-    let (mut first, rest): (Vec<u32>, Vec<u32>) = chests.iter().partition(|&&c| holds(c));
-    first.extend(rest);
     let mut moved = 0;
-    for chest in first {
+    for chest in storage_order(base, item, chests) {
         moved += base.move_items(from, slot, chest, u32::MAX);
         if moved >= count {
             break;
@@ -313,12 +332,8 @@ fn craft(table: &Table, order: &mut Order, recipe: &Recipe, assistant: u32, base
             }
         }
         for &(item, count) in &recipe.outputs {
-            // chests already holding it first
-            let holds = |c: u32| base.slots(c).iter().any(|s| s.item == item && s.count != 0);
-            let (mut first, rest): (Vec<u32>, Vec<u32>) = chests.iter().partition(|&&c| holds(c));
-            first.extend(rest);
             let mut made = 0;
-            for chest in first {
+            for chest in storage_order(base, item, &chests) {
                 made += base.give(chest, item, count - made);
                 if made >= count {
                     break;
@@ -379,11 +394,13 @@ pub mod fake {
         pub young: Vec<(u32, u32, bool)>,
         /// crops whose replanting fails
         pub unplantable: Vec<u32>,
+        /// chests named for categories: chest -> the items they ask for
+        pub categories: HashMap<u32, Vec<u32>>,
     }
 
     impl FakeBase {
         pub fn new(npcs: Vec<(u32, u32)>) -> FakeBase {
-            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default(), young: Vec::new(), unplantable: Vec::new() }
+            FakeBase { inventories: RefCell::default(), stations: RefCell::default(), npcs, max_stack: 50, tanks: RefCell::default(), wells: Vec::new(), harvest: Vec::new(), finished: RefCell::default(), seedlings: HashMap::new(), replanted: RefCell::default(), homes: RefCell::default(), positions: HashMap::new(), assistants: Vec::new(), growing: Vec::new(), feeders: Vec::new(), loot: HashMap::new(), looted: RefCell::default(), young: Vec::new(), unplantable: Vec::new(), categories: HashMap::new() }
         }
         pub fn chest(&self, entity: u32, slots: usize, items: &[(u32, u32)]) {
             let mut inv = vec![(0, 0); slots];
@@ -485,6 +502,10 @@ pub mod fake {
         fn stations_near(&self, _: u32, _: f64) -> Vec<Station> {
             self.stations.borrow().clone()
         }
+        fn chest_accepts(&self, chest: u32, item: u32) -> Option<bool> {
+            self.categories.get(&chest).map(|items| items.contains(&item))
+        }
+
         fn chests_near(&self, _: u32, _: f64) -> Vec<u32> {
             let mut not_storage: Vec<u32> = self.stations.borrow().iter().map(|s| s.entity).collect();
             not_storage.extend(self.harvest.iter().map(|h| h.0));
@@ -681,6 +702,23 @@ mod tests {
         assert_eq!(base.count(CHEST, VEG_A) + base.count(CHEST, VEG_B), 1);
         assert_eq!(base.count(STATION, MEAT), 0);
         assert_eq!(base.stations.borrow()[0].next, 0);
+    }
+
+    #[test]
+    fn results_go_into_the_chest_named_for_them() {
+        let t = table();
+        let mut base = FakeBase::new(vec![(ASSISTANT, 7)]);
+        base.station(STATION, KITCHEN);
+        // the material's chest (no category), an "Ores" chest and a "Food" chest
+        base.chest(CHEST, 48, &[(MEAT, 4), (VEG_A, 1)]);
+        base.chest(CHEST + 1, 48, &[]);
+        base.chest(CHEST + 2, 48, &[]);
+        base.categories.insert(CHEST + 1, vec![]);
+        base.categories.insert(CHEST + 2, vec![STEW]);
+        let mut o = order(5);
+        assert_eq!(run(&t, &base, &mut o), Status::Done);
+        assert_eq!((base.count(CHEST + 2, STEW), base.count(CHEST, STEW), base.count(CHEST + 1, STEW)), (5, 0, 0));
+        assert_eq!(storage_order(&base, STEW, &[CHEST, CHEST + 1, CHEST + 2]), vec![CHEST + 2, CHEST, CHEST + 1], "other categories last");
     }
 
     #[test]

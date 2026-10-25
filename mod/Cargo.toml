@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["client", "common", "examples/hello_mod", "link", "mods/assistants", "mods/chestsort", "mods/gemforge", "mods/lantern", "mods/meter", "mods/storage", "mods/travel", "sdk", "server"]
+members = ["categories", "client", "common", "examples/hello_mod", "link", "mods/assistants", "mods/chestsort", "mods/gemforge", "mods/lantern", "mods/meter", "mods/storage", "mods/travel", "sdk", "server"]
 
 [workspace.package]
 version = "0.6.0"

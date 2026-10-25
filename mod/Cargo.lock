@@ -7,6 +7,7 @@ name = "assistants"
 version = "0.6.0"
 dependencies = [
  "serde_json",
+ "shroudlink-categories",
  "shroudlink-sdk",
 ]
 
@@ -38,6 +39,7 @@ version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
+ "shroudlink-categories",
  "shroudlink-sdk",
 ]
 
@@ -265,6 +267,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "shroudlink-categories"
+version = "0.6.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shroudlink-sdk",
+]
+
+[[package]]
 name = "shroudlink-client"
 version = "0.6.0"
 dependencies = [
@@ -308,6 +319,7 @@ checksum = "7a3d689654af89bdfeba29a914ab6ac0236d382eb3b764f7454dde052f2821f8"
 name = "storage"
 version = "0.6.0"
 dependencies = [
+ "shroudlink-categories",
  "shroudlink-sdk",
 ]
 

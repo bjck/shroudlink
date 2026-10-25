@@ -4,8 +4,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// Item id -> debug name for the current build (chestsort's table).
-const ITEM_NAMES: &str = include_str!("../../chestsort/items.tsv");
+use shroudlink_categories::ITEM_NAMES;
 
 fn item_names() -> &'static HashMap<u32, String> {
     static NAMES: OnceLock<HashMap<u32, String>> = OnceLock::new();

@@ -11,4 +11,5 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+shroudlink-categories = { path = "../../categories" }
 shroudlink-sdk = { path = "../../sdk" }

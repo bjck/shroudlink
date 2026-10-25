@@ -161,6 +161,9 @@ pub trait Base {
     fn stations_near(&self, entity: u32, radius: f64) -> Vec<Station>;
     /// Storage around an entity: inventories that are no station, NPC or animal.
     fn chests_near(&self, entity: u32, radius: f64) -> Vec<u32>;
+    /// Whether a chest's name asks for the item by chestsort's categories ("Food",
+    /// "Ores, Gems"); None when its name names no category.
+    fn chest_accepts(&self, chest: u32, item: u32) -> Option<bool>;
     fn slots(&self, entity: u32) -> Vec<Slot>;
     /// Moves up to `count` items of a stack (`u32::MAX`: the whole stack, spread over
     /// partial stacks and free slots).
@@ -322,6 +325,11 @@ impl Base for WorldBase<'_> {
         const NOT_STORAGE: [&str; 8] = ["FactoryStation", "NpcCommon", "ActiveNpcState", "DestroyOnLoot", "InteractionLootRefill", "Growth", "RandomLootContainer", "AnimalTarget"];
         let not_storage = |e: u32| NOT_STORAGE.iter().any(|c| self.world.component(e, c).is_some());
         self.world.inventories_near(entity, radius).into_iter().filter(|&e| !not_storage(e)).collect()
+    }
+
+    fn chest_accepts(&self, chest: u32, item: u32) -> Option<bool> {
+        let items = shroudlink_categories::items_for(&self.world.chest_name(chest)?);
+        (!items.is_empty()).then(|| items.contains(&item))
     }
 
     fn slots(&self, entity: u32) -> Vec<Slot> {

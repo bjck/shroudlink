@@ -1,4 +1,6 @@
-//! Item categories that chest names refer to ("Food", "Ores, Gems", "Wood + Stone").
+//! Item categories that chest names refer to ("Food", "Ores, Gems", "Wood + Stone"),
+//! shared by the mods: chestsort sorts quick stacks by them, the assistants put their
+//! results where they belong. Also the item id -> debug name table ([`ITEM_NAMES`]).
 //!
 //! The categories live in `chestsort_categories.json` next to the server
 //! executable, which is created from the built-in defaults (`categories.json`,
@@ -15,8 +17,8 @@ use shroudlink_sdk::log;
 use serde::Deserialize;
 
 const DEFAULT_FILE: &str = include_str!("../categories.json");
-/// `item id <tab> debug name` for every item of the game build the mod targets.
-const ITEM_NAMES: &str = include_str!("../items.tsv");
+/// `item id <tab> debug name` for every item of the game build the mods target.
+pub const ITEM_NAMES: &str = include_str!("../items.tsv");
 const FILE_NAME: &str = "chestsort_categories.json";
 /// How often a deposit may look at the file's modification time.
 const RELOAD_CHECK: Duration = Duration::from_secs(2);

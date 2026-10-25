@@ -5,12 +5,12 @@
 //! - Slots locked with the client addon (L) never leave the player in any transfer.
 //! - The MODS tab window lists the categories and finds the chest an item belongs in.
 
-mod categories;
 mod locks;
 mod ui;
 
 use std::collections::HashSet;
 
+use shroudlink_categories as categories;
 use shroudlink_sdk::{export_mod, log, Game, Host, InventoryEvent, Mod, TransferKind, Value};
 
 pub(crate) const ID: &str = "chestsort";

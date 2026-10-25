@@ -1,6 +1,6 @@
 """Assign every stackable item (plus gear and weapon gems) one chest category, based on its game category and debug name.
 
-usage: python categorize.py <items.tsv from the chest_dump EML mod> <out dir, e.g. mod/server>
+usage: python categorize.py <items.tsv from the chest_dump EML mod> <out dir: mod/categories>
 
 Writes categories.json (the editable default category file, by item debug name) and
 items.tsv (item id <tab> debug name for every item, used to resolve names at runtime).

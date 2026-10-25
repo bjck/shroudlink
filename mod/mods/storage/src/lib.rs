@@ -15,8 +15,7 @@ const ID: &str = "storage";
 const RADIUS: f64 = 40.0;
 /// Item slots on a page.
 const PAGE: usize = 64;
-/// Item id -> debug name for the current build (chestsort's table, see its categories).
-const ITEM_NAMES: &str = include_str!("../../chestsort/items.tsv");
+use shroudlink_categories::ITEM_NAMES;
 
 /// Lower-case debug names by item id.
 fn item_names() -> &'static HashMap<u32, String> {

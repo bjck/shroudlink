@@ -14,7 +14,7 @@ use shroudlink_sdk::log;
 
 use crate::base::{Base, Harvest};
 use crate::fishing::{self, Dice};
-use crate::work::{deposit, RADIUS};
+use crate::work::{deposit, storage_order, RADIUS};
 
 /// `NpcResource.workshopId` of the Farmer and the Farmer's assistant.
 pub const FARMER_WORKSHOP: u32 = 3651361391;
@@ -175,7 +175,7 @@ pub fn harvest(base: &dyn Base, gardener: u32, job: &mut Job) -> u32 {
             if base.mark_looted(plant) {
                 for (item, count) in loot {
                     let mut left = count;
-                    for &chest in &chests {
+                    for chest in storage_order(base, item, &chests) {
                         if left == 0 {
                             break;
                         }
@@ -397,10 +397,7 @@ pub fn fish(base: &dyn Base, fisher: u32, seconds: u32, job: &mut Job, dice: &mu
             job.status = "could not take the bait".into();
             break;
         }
-        let holds = |c: u32| base.slots(c).iter().any(|s| s.item == catch && s.count != 0);
-        let (mut order, rest): (Vec<u32>, Vec<u32>) = chests.iter().partition(|&&c| holds(c));
-        order.extend(rest);
-        if !order.iter().any(|&c| base.give(c, catch, 1) == 1) {
+        if !storage_order(base, catch, &chests).into_iter().any(|c| base.give(c, catch, 1) == 1) {
             if base.give(chest, bait, 1) != 1 {
                 log!("assistants: no room for the fish, and the bait {bait} could not go back to {chest}");
             }
