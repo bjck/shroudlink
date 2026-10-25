@@ -8,7 +8,9 @@ offline. Phase 2b: backpack panel sections and HUD notifications; `newmod.py` cr
 mod from a template. ABI v3: game events (all 130 ECS event types, read from the game's
 event queues before dispatch; `server/src/game_events.rs`). HostApi v6: `entities_near` (loaded
 entities with a component type around an entity) and `move_items` (exact counts); v7 (feature `items`): `give_items`
-and `remove_items`, through the game's own inventory functions (`server/src/items.rs`).
+and `remove_items`, through the game's own inventory functions (`server/src/items.rs`); v8:
+`World::chest_name`, a chest's custom name from any callback (names the core's background
+scan already knows, so it never rescans on the game thread).
 
 ## Goal
 

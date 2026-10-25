@@ -421,6 +421,12 @@ pub unsafe extern "C" fn api_player_name(entity: u32, buf: *mut u8, cap: usize) 
     name.len()
 }
 
+pub unsafe extern "C" fn api_chest_name(entity: u32, buf: *mut u8, cap: usize) -> usize {
+    let Some(name) = world_ctx::with(|ctx| crate::game_api::name_known(events::game(), ctx, entity)).flatten() else { return 0 };
+    std::ptr::copy_nonoverlapping(name.as_ptr(), buf, name.len().min(cap));
+    name.len()
+}
+
 pub unsafe extern "C" fn api_player_of(client: u64) -> u32 {
     player_of(client).unwrap_or(0)
 }

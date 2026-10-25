@@ -393,6 +393,14 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     } else {
         report.skip("give_items", "feature items is off");
     }
+    // ---- HostApi v8: chest names from the world, outside an inventory event ----
+    let name_of = |entity: u32| {
+        let mut buf = [0u8; 64];
+        let n = crate::world::api_chest_name(entity, buf.as_mut_ptr(), buf.len());
+        String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned()
+    };
+    let (named, unnamed) = (name_of(chest), name_of(player));
+    report.check("world chest_name", if named == "Ores" && unnamed.is_empty() { Ok("the test chest is \"Ores\", the player has no name".into()) } else { Err(format!("chest {named:?}, player {unnamed:?}")) });
     research_production(report, chest);
     // buffs need a running impact program, which needs a real player nearby
     let _ = writeln!(report.text, "INFO buffs: feature {}, getSelf ran {} time(s) so far", if crate::hooks::available(crate::hooks::Feature::Buffs) { "on" } else { "OFF" }, crate::buffs::calls());

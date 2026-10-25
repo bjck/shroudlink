@@ -56,7 +56,7 @@ pub use events::{GameEvent, Known};
 /// tells its own version: functions newer than it must not be called (the SDK checks).
 /// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`; v6 appends
 /// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`.
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -151,6 +151,10 @@ pub struct HostApi {
     pub give_items: unsafe extern "C" fn(entity: u32, item: u32, count: u32) -> u32,
     /// Removes up to `count` items from a slot; returns how many.
     pub remove_items: unsafe extern "C" fn(entity: u32, slot: u64, count: u32) -> u32,
+    // v8
+    /// Copies up to `cap` bytes of an entity's custom name, from any callback; returns its
+    /// full length (0: none or not known yet).
+    pub world_chest_name: unsafe extern "C" fn(entity: u32, buf: *mut u8, cap: usize) -> usize,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -375,6 +379,21 @@ impl World<'_> {
             return 0;
         }
         unsafe { (self.api.remove_items)(entity, slot, count) }
+    }
+
+    /// The custom name players gave an entity (a chest's "Rename"), from any callback
+    /// (host v8). A name given in the last 15 s may not be known yet.
+    pub fn chest_name(&self, entity: u32) -> Option<String> {
+        if self.api.version < 8 {
+            return None;
+        }
+        let mut buf = vec![0u8; 256];
+        let n = unsafe { (self.api.world_chest_name)(entity, buf.as_mut_ptr(), buf.len()) };
+        if n > buf.len() {
+            buf.resize(n, 0);
+            unsafe { (self.api.world_chest_name)(entity, buf.as_mut_ptr(), buf.len()) };
+        }
+        (n != 0).then(|| String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned())
     }
 
     /// A player's name (their Steam name), known once their addon has identified the
@@ -719,6 +738,9 @@ pub mod testing {
     unsafe extern "C" fn give_items(_: u32, _: u32, _: u32) -> u32 {
         0
     }
+    unsafe extern "C" fn world_chest_name(_: u32, _: *mut u8, _: usize) -> usize {
+        0
+    }
     unsafe extern "C" fn remove_items(_: u32, _: u64, _: u32) -> u32 {
         0
     }
@@ -726,7 +748,7 @@ pub mod testing {
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name },
                 sent: Box::default(),
             }
         }

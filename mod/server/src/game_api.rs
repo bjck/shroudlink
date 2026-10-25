@@ -145,6 +145,16 @@ unsafe fn find_destination(pages: &[Page], item_id: u32, max_stack: u32) -> Opti
 
 /// The name given to an entity with the Rename button, if any.
 pub(crate) unsafe fn name_of(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<String> {
+    name_with(game, ctx, entity, true)
+}
+
+/// Like [`name_of`], but never rescans the heap for an unknown key (a rescan takes about
+/// half a second on the game thread); the background scan finds new names within 15 s.
+pub(crate) unsafe fn name_known(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<String> {
+    name_with(game, ctx, entity, false)
+}
+
+unsafe fn name_with(game: &Game, ctx: *mut Ctx, entity: u32, fresh: bool) -> Option<String> {
     if let Some(name) = crate::selftest::fake_name(entity) {
         return Some(name);
     }
@@ -162,7 +172,7 @@ pub(crate) unsafe fn name_of(game: &Game, ctx: *mut Ctx, entity: u32) -> Option<
         let (addr, size) = record.component(known as u16)?;
         let key = *(addr as *const u64);
         // no name given: nothing to look up (an unknown key rescans the heap)
-        return (size == 8 && key != 0).then(|| names::lookup_fresh(key)).flatten();
+        return (size == 8 && key != 0).then(|| if fresh { names::lookup_fresh(key) } else { names::lookup(key) }).flatten();
     }
     // not learned yet: the name component is the 8-byte component whose value is a name key
     for (index, addr) in record.components_of_size(8) {

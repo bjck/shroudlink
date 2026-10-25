@@ -63,6 +63,7 @@ static API: HostApi = HostApi {
     move_items: crate::world::api_move_items,
     give_items: crate::items::api_give_items,
     remove_items: crate::items::api_remove_items,
+    world_chest_name: crate::world::api_chest_name,
 };
 
 /// Ticks handed to v5 mods, for the self-test.
