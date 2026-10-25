@@ -13,8 +13,8 @@ use shroudlink_sdk::{export_mod, log, Host, Mod, Value, World};
 const ID: &str = "storage";
 /// How far around the player chests count, in metres.
 const RADIUS: f64 = 40.0;
-/// Item slots shown at most.
-const SHOWN: usize = 64;
+/// Item slots on a page.
+const PAGE: usize = 64;
 /// Item id -> debug name for the current build (chestsort's table, see its categories).
 const ITEM_NAMES: &str = include_str!("../../chestsort/items.tsv");
 
@@ -59,13 +59,18 @@ fn contents(world: &World, player: u32) -> Contents {
     out
 }
 
-/// The items shown, most first (the grid's click index points into this); with a search,
-/// only the matching ones.
+/// The items to show, most first; with a search, only the matching ones.
 fn shown(contents: &Contents, query: &str) -> Vec<(u32, u32)> {
     let mut items: Vec<(u32, u32)> = contents.items.iter().filter(|(&item, _)| query.is_empty() || matches(item, query)).map(|(&item, &(total, _))| (item, total)).collect();
     items.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    items.truncate(SHOWN);
     items
+}
+
+/// Page `page` of `items` (the last one if `page` is past it), its number and the count of pages.
+fn page_of(items: &[(u32, u32)], page: usize) -> (&[(u32, u32)], usize, usize) {
+    let pages = items.len().div_ceil(PAGE).max(1);
+    let page = page.min(pages - 1);
+    (&items[page * PAGE..((page + 1) * PAGE).min(items.len())], page, pages)
 }
 
 #[derive(Default)]
@@ -75,6 +80,8 @@ pub struct Storage {
     status: HashMap<u64, String>,
     /// the search per client
     searches: HashMap<u64, String>,
+    /// the page per client
+    pages: HashMap<u64, usize>,
 }
 
 impl Storage {
@@ -86,13 +93,25 @@ impl Storage {
             Some(player) => {
                 let query = self.searches.get(&client).cloned().unwrap_or_default();
                 let all = contents(&world, player);
-                let items = shown(&all, &query);
+                let matching = shown(&all, &query);
+                let (items, page, pages) = page_of(&matching, self.pages.get(&client).copied().unwrap_or(0));
+                self.pages.insert(client, page);
+                let items = items.to_vec();
                 content.push(Node::Text { text: format!("{} chest(s) within {RADIUS:.0} m, {} kind(s) of items. Click an item to take it.", all.chests, all.items.len()) });
                 content.push(Node::TextInput { id: "search".into(), value: query.clone(), hint: "Search items, e.g. iron bar".into() });
                 if !query.is_empty() {
-                    content.push(Node::Text { text: format!("{} kind(s) match \"{query}\"", items.len()) });
+                    content.push(Node::Text { text: format!("{} kind(s) match \"{query}\"", matching.len()) });
                 }
                 content.push(Node::ItemGrid { id: "items".into(), columns: 8, items: items.iter().map(|&(id, count)| Item { id, count }).collect() });
+                if pages > 1 {
+                    content.push(Node::Row {
+                        children: vec![
+                            Node::Button { id: "prev".into(), label: "«".into() },
+                            Node::Text { text: format!("{} of {pages}", page + 1) },
+                            Node::Button { id: "next".into(), label: "»".into() },
+                        ],
+                    });
+                }
                 self.showing.insert(client, items);
             }
         }
@@ -138,9 +157,16 @@ impl Mod for Storage {
             ("open", Event::Menu) | ("refresh", Event::Click { .. }) => {}
             ("search", Event::Submit { value }) => {
                 self.searches.insert(client, value.trim().to_owned());
+                self.pages.remove(&client);
             }
+            ("prev", Event::Click { .. }) => {
+                let page = self.pages.entry(client).or_default();
+                *page = page.saturating_sub(1);
+            }
+            ("next", Event::Click { .. }) => *self.pages.entry(client).or_default() += 1,
             (_, Event::Closed) => {
                 self.searches.remove(&client);
+                self.pages.remove(&client);
                 return;
             }
             ("items", Event::Click { index: Some(i) }) => {
@@ -160,6 +186,7 @@ impl Mod for Storage {
         self.showing.remove(&client);
         self.status.remove(&client);
         self.searches.remove(&client);
+        self.pages.remove(&client);
     }
 }
 
@@ -176,6 +203,16 @@ mod tests {
         c.items.insert(7, (40, vec![(100, 2), (101, 3)]));
         c.items.insert(6, (40, vec![(101, 4)]));
         assert_eq!(shown(&c, ""), vec![(6, 40), (7, 40), (5, 3)]);
+    }
+
+    #[test]
+    fn items_come_in_pages() {
+        let items: Vec<(u32, u32)> = (0..150).map(|i| (i, 1000 - i)).collect();
+        let (first, page, pages) = page_of(&items, 0);
+        assert_eq!((first.len(), first[0], page, pages), (64, (0, 1000), 0, 3));
+        let (last, page, _) = page_of(&items, 9);
+        assert_eq!((last.len(), last[0].0, page), (22, 128, 2), "past the end: the last page");
+        assert_eq!(page_of(&[], 0).2, 1);
     }
 
     #[test]
