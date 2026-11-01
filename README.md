@@ -24,6 +24,7 @@ Players without the addon join and play normally.
 ![The MODS tab: the base's survivors, the Farmer's orders, jobs and crops](docs/screenshots/assistants.gif)
 
 **[Download the latest release](https://github.com/bjck/shroudlink/releases/latest)** ·
+**[On Nexus Mods](https://www.nexusmods.com/enshrouded/mods/278)** ·
 [Install for players](docs/wiki/Players-Installing-the-Addon.md) (1 minute) ·
 [Install on a server](docs/wiki/Server-Installation.md) ·
 [Write your own mod](docs/wiki/Modding-Getting-Started.md)
@@ -84,8 +85,9 @@ search. Click an item to take it from all chests at once.
 The wiki pages live in [`docs/wiki/`](docs/wiki/Home.md): for players, server owners and mod developers.
 
 ## Downloads
-See the releases: `shroudlink-client.zip` (players) and `chestsort-enshrouded.zip`
-(server owner: mod, update script, data patches).
+See the [releases](https://github.com/bjck/shroudlink/releases): `shroudlink-client.zip` (players)
+and `chestsort-enshrouded.zip` (server owner: framework core, built-in mods, update script,
+data patches). The same files are on [Nexus Mods](https://www.nexusmods.com/enshrouded/mods/278).
 
 ## Layout
 | Path | Content |
