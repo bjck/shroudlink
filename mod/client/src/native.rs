@@ -59,6 +59,14 @@ const PLAYER_PAGE_OFFSET: usize = 0x31e70;
 /// A page index without a page: the player menu then draws only its frame.
 const NO_PAGE: u64 = 7;
 const SIG_TAB_LIST: &str = "48 8B C4 48 89 58 08 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1";
+/// `FUN_7ff6233017b0(action, style)`: draws the key bound to an input action (the key
+/// labels above the player menu tabs). Its first call, `FUN_7ff6234819b0(out, input,
+/// action)`, looks the binding up into a key description of `KEY_DESC_SIZE` bytes: +0 kind
+/// (1: keyboard key), +2 key code (u16, USB HID usage: A = 4 .. Z = 29); the rest is zero
+/// for a plain key.
+const SIG_KEY_PROMPT: &str = "40 53 48 81 EC 90 02 00 00 48 8B 05 ?? ?? ?? ??";
+const KEY_DESC_SIZE: usize = 0xc4;
+const HID_KEY_A: u16 = 4;
 /// `FUN_7ff6232de670(&entry, &rect)`: draws one tab of a tab row; true when it is the active tab.
 const SIG_TAB_WIDGET: &str = "40 55 53 56 48 8D AC 24 60 FD FF FF";
 const SIG_BEGIN_LAYER: &str = "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 50 48 8B 05 ?? ?? ?? ?? 45 8B D9";
@@ -120,6 +128,7 @@ impl UiStr {
 type DispatchFn = unsafe extern "system" fn();
 type PlayerMenuFn = unsafe extern "system" fn(menu: u8, mode: i32) -> u64;
 type TabListFn = unsafe extern "system" fn(menu: u8, list: *mut TabList) -> *mut c_void;
+type KeyResolveFn = unsafe extern "system" fn(out: *mut u8, input: usize, action: u32) -> *mut u8;
 type TabWidgetFn = unsafe extern "system" fn(entry: *mut u8, rect: *mut f32) -> u64;
 
 /// The game's small vector of 0x40 byte tab entries.
@@ -132,6 +141,15 @@ pub struct TabList {
 /// Social, World, Journal, Crafting, Backpack, Character, Skills.
 const PLAYER_MENU_TABS: usize = 7;
 const TAB_ENTRY_SIZE: usize = 0x40;
+/// Tab entry fields (built by the tab list function): input action of the key label
+/// (0x8b: none), label text (pointer, length, string id; the id doubles as frame key),
+/// active, and the two notice marks (e.g. CRAFTING's "!").
+const TAB_ACTION: usize = 0x01;
+const TAB_LABEL: usize = 0x18;
+const TAB_LABEL_LEN: usize = 0x20;
+const TAB_KEY: usize = 0x28;
+const TAB_ACTIVE: usize = 0x30;
+const TAB_MARKS: usize = 0x38;
 type OpenRowFn = OpenColumnFn;
 type BackgroundFn = unsafe extern "system" fn(frame: *mut u8, desc: *const u8);
 /// `FUN_7ff62304a800(frame, rect, colour)`: a solid rectangle (screen UI units; colour
@@ -182,6 +200,7 @@ pub struct Api {
     text_emit: TextEmitFn,
     game_ui: usize,
     tips: Option<ItemTips>,
+    key_resolve: Option<GenericDetour<KeyResolveFn>>,
 }
 
 /// The game's item tooltip, as the inventory screen (`FUN_7ff62319c4c0`) draws it: its
@@ -491,6 +510,49 @@ static PLAYER_TAB_KEYS: [std::sync::atomic::AtomicU64; PLAYER_MENU_TABS] = [cons
 /// The game tab clicked while the MODS page was open (`NO_PAGE`: none); the player menu
 /// hook shows it instead of the page it hid.
 static CHOSEN_PAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(NO_PAGE);
+/// The last player menu tab entry, the template of the MODS tab.
+static TAB_TEMPLATE: std::sync::Mutex<[u8; TAB_ENTRY_SIZE]> = std::sync::Mutex::new([0; TAB_ENTRY_SIZE]);
+/// The game draws the MODS tab (the key lookup hook is in place).
+static NATIVE_MODS_TAB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Key code the key lookup reports instead of the bound key (0: none), while the MODS
+/// tab is drawn.
+static KEY_OVERRIDE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+const MODS_TAB_LABEL: &str = "Mods";
+
+unsafe extern "system" fn key_resolve_hook(out: *mut u8, input: usize, action: u32) -> *mut u8 {
+    let api = API.get().unwrap();
+    let r = api.key_resolve.as_ref().unwrap().call(out, input, action);
+    let code = KEY_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+    if code != 0 && !out.is_null() {
+        std::ptr::write_bytes(out, 0, KEY_DESC_SIZE);
+        *out = 1;
+        *(out.add(2) as *mut u16) = code;
+    }
+    r
+}
+
+/// The MODS tab as a game tab: the last tab's entry with its own label, key and state,
+/// drawn by the game's tab widget right after it, so it looks like every other tab.
+unsafe fn draw_native_mods_tab(api: &Api) {
+    let mut entry = *TAB_TEMPLATE.lock().unwrap();
+    if entry[TAB_ACTION] == 0x8b {
+        return;
+    }
+    *(entry.as_mut_ptr().add(TAB_LABEL) as *mut *const u8) = MODS_TAB_LABEL.as_ptr();
+    *(entry.as_mut_ptr().add(TAB_LABEL_LEN) as *mut u64) = MODS_TAB_LABEL.len() as u64;
+    *(entry.as_mut_ptr().add(TAB_KEY) as *mut u64) = shroudlink::string_id(b"shroudlinkModsTab");
+    entry[TAB_ACTIVE] = crate::ui::mods_page_open() as u8;
+    entry[TAB_MARKS] = 0;
+    entry[TAB_MARKS + 1] = 0;
+    crate::ui::mods_tab_drawn();
+    let mut rect = [0f32; 4];
+    KEY_OVERRIDE.store(crate::input::mods_key() as u16 - b'A' as u16 + HID_KEY_A, std::sync::atomic::Ordering::Relaxed);
+    api.tab_widget.call(entry.as_mut_ptr(), rect.as_mut_ptr());
+    KEY_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
+    if mouse_click_in(rect) {
+        crate::ui::mods_tab_clicked();
+    }
+}
 
 unsafe extern "system" fn tab_list_hook(menu: u8, list: *mut TabList) -> *mut c_void {
     let api = API.get().unwrap();
@@ -499,6 +561,7 @@ unsafe extern "system" fn tab_list_hook(menu: u8, list: *mut TabList) -> *mut c_
     if !list.is_null() && (*list).len == PLAYER_MENU_TABS {
         let last = (*list).data.add(((*list).len - 1) * TAB_ENTRY_SIZE);
         LAST_PLAYER_TAB.store(*(last.add(0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
+        TAB_TEMPLATE.lock().unwrap().copy_from_slice(std::slice::from_raw_parts(last, TAB_ENTRY_SIZE));
         for (i, k) in PLAYER_TAB_KEYS.iter().enumerate() {
             k.store(*((*list).data.add(i * TAB_ENTRY_SIZE + 0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
         }
@@ -513,19 +576,22 @@ unsafe extern "system" fn tab_widget_hook(entry: *mut u8, rect: *mut f32) -> u64
     let mut active = api.tab_widget.call(entry, rect);
     if last != 0 && key == last {
         // right after the last game tab: the MODS tab, in the same tab row
-        crate::ui::draw_mods_tab(api);
+        if NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) {
+            draw_native_mods_tab(api);
+        } else {
+            crate::ui::draw_mods_tab(api);
+        }
     }
     if crate::ui::mods_page_open() {
         // while the MODS page is open no game tab is shown as active
         active &= !0xff;
-        // the game's own click on a tab only selects the page the MODS page hides (the
-        // player menu hook restores it), so a click on a game tab is detected here; the
-        // call has filled `rect` with the tab's layout rectangle (x, y, w, h, UI units)
+        // addon-drawn MODS tab: the game's own click on a tab is lost in the player menu
+        // hook, so it is detected here; the call has filled `rect` with the tab's layout
+        // rectangle (x, y, w, h, UI units)
         let page = PLAYER_TAB_KEYS.iter().position(|k| k.load(std::sync::atomic::Ordering::Relaxed) == key);
-        if let Some(page) = page {
+        if let Some(page) = page.filter(|_| !NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed)) {
             if mouse_click_in(*(rect as *const [f32; 4])) {
                 CHOSEN_PAGE.store(page as u64, std::sync::atomic::Ordering::Relaxed);
-                crate::ui::game_tab_chosen();
             }
         }
     }
@@ -541,13 +607,34 @@ unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
             let saved = *page;
             *page = NO_PAGE;
             let r = api.player_menu.call(menu, mode);
-            // the tab row writes this field every frame (the hidden page comes back as the
-            // last tab), so it is always restored: to the game tab clicked meanwhile, if any
-            let chosen = CHOSEN_PAGE.swap(NO_PAGE, std::sync::atomic::Ordering::Relaxed);
-            *page = if chosen < NO_PAGE { chosen } else { saved };
+            // the tab row writes its selection into this field every frame. With the
+            // game-drawn MODS tab the row has eight tabs and NO_PAGE is the MODS tab, so
+            // a game page here is a click on its tab (or Q/E). The addon-drawn tab leaves
+            // seven, the selection comes back as the last tab every frame, and clicks are
+            // hit-tested in tab_widget_hook instead.
+            let chosen = match *page {
+                written if written < NO_PAGE && NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) => written,
+                _ => CHOSEN_PAGE.swap(NO_PAGE, std::sync::atomic::Ordering::Relaxed),
+            };
+            if chosen < NO_PAGE {
+                crate::ui::game_tab_chosen();
+                *page = chosen;
+            } else {
+                *page = saved;
+            }
             r
         }
-        _ => api.player_menu.call(menu, mode),
+        // the game counts the MODS tab as an eighth tab: a click on it selects a page that
+        // does not exist (the click itself opens the MODS page, see draw_native_mods_tab)
+        Some(page) => {
+            let saved = *page;
+            let r = api.player_menu.call(menu, mode);
+            if *page >= NO_PAGE {
+                *page = saved;
+            }
+            r
+        }
+        None => api.player_menu.call(menu, mode),
     }
 }
 
@@ -822,6 +909,11 @@ pub fn install(module: &Module) -> Result<(), String> {
             text_emit: std::mem::transmute::<usize, TextEmitFn>(find(SIG_TEXT_EMIT)?),
             game_ui,
             tips: item_tips(&find),
+            // optional: without it the MODS tab is drawn by the addon (ui::draw_mods_tab)
+            key_resolve: find(SIG_KEY_PROMPT)
+                .ok()
+                .and_then(|f| chestsort_common::scan::call_targets(f, 0x40).first().copied())
+                .and_then(|t| GenericDetour::new(std::mem::transmute::<usize, KeyResolveFn>(t), key_resolve_hook).ok()),
         };
         let api = API.get_or_init(|| api);
         api.dispatch.enable().map_err(|e| e.to_string())?;
@@ -832,6 +924,9 @@ pub fn install(module: &Module) -> Result<(), String> {
         api.tab_list.enable().map_err(|e| e.to_string())?;
         api.player_menu.enable().map_err(|e| e.to_string())?;
         api.tab_widget.enable().map_err(|e| e.to_string())?;
+        let native_tab = api.key_resolve.as_ref().is_some_and(|d| d.enable().is_ok());
+        NATIVE_MODS_TAB.store(native_tab, std::sync::atomic::Ordering::Relaxed);
+        log!("MODS tab: {}", if native_tab { "drawn by the game's tab widget" } else { "drawn by the addon (key lookup not found)" });
         log!("native UI ready: game ui +{:#x}, builder +{:#x}", module.rva(game_ui), module.rva(builder));
     }
     Ok(())
@@ -848,6 +943,9 @@ pub fn uninstall() {
             let _ = api.tab_list.disable();
             let _ = api.player_menu.disable();
             let _ = api.tab_widget.disable();
+            if let Some(d) = &api.key_resolve {
+                let _ = d.disable();
+            }
         }
     }
 }

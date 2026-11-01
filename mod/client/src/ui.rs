@@ -182,9 +182,10 @@ pub fn mods_page_open() -> bool {
     PAGE_OPEN.load(Ordering::Relaxed)
 }
 
-/// Draws the MODS tab inside the player menu tab row (called from the tab widget hook).
+/// Draws the MODS tab inside the player menu tab row (called from the tab widget hook)
+/// when the game cannot draw it as one of its own tabs (`native::draw_native_mods_tab`).
 pub fn draw_mods_tab(api: &Api) {
-    TAB_FRAME.store(FRAME.load(Ordering::Relaxed), Ordering::Relaxed);
+    mods_tab_drawn();
     let label = if mods_page_open() { "» Mods «" } else { "Mods" };
     unsafe {
         // like the game's tabs: the key above the name
@@ -206,6 +207,16 @@ pub fn draw_mods_tab(api: &Api) {
     }
 }
 
+/// The MODS tab was drawn this frame: the player menu is open.
+pub fn mods_tab_drawn() {
+    TAB_FRAME.store(FRAME.load(Ordering::Relaxed), Ordering::Relaxed);
+}
+
+/// The game-drawn MODS tab was clicked.
+pub fn mods_tab_clicked() {
+    set_page_open(!mods_page_open());
+}
+
 /// Opens or closes the MODS page in the player menu (as a click on its tab does).
 fn set_page_open(open: bool) {
     PAGE_OPEN.store(open, Ordering::Relaxed);
@@ -217,7 +228,7 @@ fn set_page_open(open: bool) {
     }
 }
 
-/// A game tab was clicked while the MODS page was open: the
+/// A game tab was clicked (or stepped to with Q/E) while the MODS page was open: the
 /// player menu shows that tab's page again.
 pub fn game_tab_chosen() {
     PAGE_OPEN.store(false, Ordering::Relaxed);
