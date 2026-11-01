@@ -1,0 +1,81 @@
+# Builds and tests every push. A tag v<version> (matching mod/Cargo.toml) also packages
+# the release zips, attests that they were built here from this commit, and puts them
+# into a DRAFT release: write the notes and publish it by hand.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # installs the version in mod/rust-toolchain.toml
+      - run: rustup toolchain install
+        working-directory: mod
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mod
+
+      - name: Test
+        working-directory: mod
+        run: cargo test --workspace --exclude shroudlink-client --locked
+
+      - name: Build
+        working-directory: mod
+        run: cargo build --release --workspace --locked
+
+      - name: Package
+        run: |
+          tag=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then tag="--tag $GITHUB_REF_NAME"; fi
+          python research/scripts/package.py --out dist/build $tag
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shroudlink-${{ github.sha }}
+          path: dist/build/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # the draft release
+      id-token: write      # build provenance
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: shroudlink-${{ github.sha }}
+          path: out
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*.zip
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" \
+              --notes "Built by GitHub Actions from $GITHUB_SHA. Verify a download with: gh attestation verify <zip> -R $GH_REPO"
+          fi
+          gh release upload "$TAG" out/chestsort-enshrouded.zip out/shroudlink-client.zip out/SHA256SUMS.txt --clobber
