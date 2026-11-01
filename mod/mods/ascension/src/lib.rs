@@ -26,10 +26,17 @@ use std::path::Path;
 
 use depths::Depths;
 use progress::{ascension_required, Account, Settings, SKILLS, STATS};
-use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, TreeLink, TreeNode, UiEvent, Window};
 use shroudlink_sdk::{attr, export_mod, json, log, Events, GameEvent, Host, Known, Mod, Value, World};
 
 const ID: &str = "ascension";
+/// The Paragon tree (`ToClient::SkillTree`) and the tab that shows it share this id.
+const TREE: &str = "paragon";
+/// Centre of the game's skill tree space and the radius of the Paragon ring around it.
+const TREE_CENTRE: (f32, f32) = (4000.0, 4000.0);
+const TREE_RADIUS: f32 = 520.0;
+/// The skill point emblem on the Paragon tree: purple (0xAABBGGRR; it multiplies the gold).
+const PARAGON_TINT: u32 = 0xffff_3080;
 const FILE: &str = "shroudlink_ascension.json";
 /// ticks (about seconds) between saves of new XP
 const SAVE_EVERY: u32 = 30;
@@ -82,6 +89,8 @@ pub struct Ascension {
     depths: Depths,
     /// round robin over the players at a depth, one sweep per tick
     sweep_next: usize,
+    /// clients that have their Paragon tree
+    trees_sent: Vec<u64>,
 }
 
 impl Ascension {
@@ -298,6 +307,41 @@ impl Ascension {
         content.push(Node::Row { children: vec![Node::Button { id: "paragon_reset".into(), label: "Take all Paragon ranks back".into() }] });
     }
 
+    /// The Paragon skills as a skill tree for the game's SKILLS page: a start node in the
+    /// middle, the skills on a ring around it.
+    fn paragon_tree(&self, account: Option<&Account>) -> ToClient {
+        let (cx, cy) = TREE_CENTRE;
+        let unspent = account.map_or(0, |a| a.paragon_unspent(&self.settings));
+        let mut nodes = vec![TreeNode { id: "start".into(), x: cx, y: cy, name: "Paragon".into(), description: format!("{unspent} Paragon point(s) to spend."), rank: 0, max_rank: 0, icon: 0 }];
+        let mut links = Vec::new();
+        for (i, skill) in SKILLS.iter().enumerate() {
+            let angle = std::f32::consts::TAU * i as f32 / SKILLS.len() as f32 - std::f32::consts::FRAC_PI_2;
+            let rank = account.map_or(0, |a| a.paragon[i]);
+            nodes.push(TreeNode {
+                id: skill.key.into(),
+                x: cx + TREE_RADIUS * angle.cos(),
+                y: cy + TREE_RADIUS * angle.sin(),
+                name: skill.name.into(),
+                description: format!("{} per rank.{}", skill.effect, if skill.verified { "" } else { " (experimental)" }),
+                rank,
+                max_rank: skill.max_rank,
+                icon: skill.icon,
+            });
+            links.push(TreeLink { from: "start".into(), to: skill.key.into() });
+        }
+        let spent = account.map_or(0, |a| a.paragon.iter().sum());
+        ToClient::SkillTree { owner: ID.into(), id: TREE.into(), nodes, links, points: Some([spent, unspent]), tint: Some(PARAGON_TINT) }
+    }
+
+    fn send_tree(&mut self, host: &mut Host, client: u64) {
+        let account = self.players.get(&client).and_then(|&p| host.world().player_account(p));
+        let tree = self.paragon_tree(account.and_then(|a| self.accounts.get(&a)));
+        host.send(client, &tree.to_message());
+        if account.is_some() && !self.trees_sent.contains(&client) {
+            self.trees_sent.push(client);
+        }
+    }
+
     fn refresh(&self, host: &mut Host) {
         for (&client, &page) in &self.open {
             let window = self.window(&host.world(), client, page);
@@ -370,6 +414,7 @@ impl Mod for Ascension {
 
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
         self.clients.retain(|&c| c != client);
+        self.trees_sent.retain(|&c| c != client);
         self.open.remove(&client);
         if let Some(player) = self.players.remove(&client) {
             self.applied.remove(&player);
@@ -422,6 +467,9 @@ impl Mod for Ascension {
                     a.spend(i, &self.settings)
                 } else if let Some(i) = id.strip_prefix("learn:").and_then(|k| SKILLS.iter().position(|s| s.key == k)) {
                     a.learn(i, &self.settings)
+                } else if let Some(i) = SKILLS.iter().position(|s| s.key == id).filter(|_| window == TREE) {
+                    // invested in a node of the Paragon tree
+                    a.learn(i, &self.settings)
                 } else {
                     false
                 };
@@ -436,6 +484,10 @@ impl Mod for Ascension {
             if self.sync(&host.world(), p, account) {
                 self.save();
             }
+        }
+        self.send_tree(host, client);
+        if window == TREE {
+            return;
         }
         let window = self.window(&host.world(), client, page);
         host.send(client, &window.to_message());
@@ -455,6 +507,11 @@ impl Mod for Ascension {
             }
         }
         self.sweep(&world);
+        // the Paragon tree goes out once a client's account is known, before its tab is opened
+        let waiting: Vec<u64> = self.clients.iter().copied().filter(|c| !self.trees_sent.contains(c) && self.players.get(c).is_some_and(|&p| world.player_account(p).is_some())).collect();
+        for client in waiting {
+            self.send_tree(host, client);
+        }
         if wrote {
             self.save();
             self.refresh(host);

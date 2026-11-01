@@ -66,6 +66,36 @@ pub enum Node {
     Tabs { id: String, tabs: Vec<String>, selected: u32 },
 }
 
+/// A node of a mod's skill tree (`ToClient::SkillTree`), drawn by the game's SKILLS page.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TreeNode {
+    pub id: String,
+    /// Position in the game's skill tree space: the vanilla tree is centred on (4000, 4000),
+    /// its inner ring of start nodes has a radius of about 570, the whole tree about 2500.
+    pub x: f32,
+    pub y: f32,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub rank: u32,
+    /// 0: a start node (the small dot paths begin at, always unlocked)
+    #[serde(default)]
+    pub max_rank: u32,
+    /// The game skill node whose icon and frame colour this node borrows (its id, as the
+    /// addon logs them: `shroudlink_client.log`, "skill tree catalog"); 0: a small node.
+    #[serde(default)]
+    pub icon: u32,
+}
+
+/// A line between two nodes of a mod's skill tree.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TreeLink {
+    pub from: String,
+    pub to: String,
+}
+
 /// A line of a HUD panel: label on the left, value on the right, over a bar filled to
 /// `fraction` (0..1; 0 draws no bar).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -133,6 +163,22 @@ pub enum ToClient {
     /// entry). An empty label removes it. Older addons ignore it: keep the entry in the
     /// MODS menu too.
     Tab { owner: String, id: String, label: String },
+    /// A skill tree drawn by the game's SKILLS page, shown by the mod's tab with the same
+    /// `id`. Investing in a node (the game's own key or click) comes back as `ui_event`
+    /// with `window` = the tree id, `node` = the node id and a click; the mod decides and
+    /// sends the tree again. No nodes removes it. `points` ([in use, available]) replaces
+    /// the page's skill point counter, `tint` (0xAABBGGRR, as the game's colours; it multiplies the
+    /// emblem's gold) colours its emblem.
+    SkillTree {
+        owner: String,
+        id: String,
+        nodes: Vec<TreeNode>,
+        links: Vec<TreeLink>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        points: Option<[u32; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tint: Option<u32>,
+    },
 }
 
 /// A message the addon sends to a mod about inventory slots.
@@ -204,6 +250,23 @@ impl UiEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_tree_message() {
+        let tree = ToClient::SkillTree {
+            owner: "ascension".into(),
+            id: "paragon".into(),
+            nodes: vec![TreeNode { id: "speed".into(), x: 4000.0, y: 3400.0, name: "Speed".into(), description: String::new(), rank: 2, max_rank: 15, icon: 0x53e6_1fff }],
+            links: vec![TreeLink { from: "start".into(), to: "speed".into() }],
+            points: Some([10, 2]),
+            tint: Some(0xffb0_60ff),
+        };
+        let msg = tree.to_message();
+        assert_eq!(msg["op"], "skill_tree");
+        let mut back = msg.clone();
+        back.as_object_mut().unwrap().remove("mod");
+        assert_eq!(serde_json::from_value::<ToClient>(back).unwrap(), tree);
+    }
 
     #[test]
     fn window_json_shape() {

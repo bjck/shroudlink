@@ -24,6 +24,8 @@ pub struct Skill {
     pub effect: &'static str,
     /// tested in game: the player notices it
     pub verified: bool,
+    /// the game skill whose icon the node in the Paragon tree borrows (0: a small node)
+    pub icon: u32,
 }
 
 /// The Paragon skills. Movement speed is measured in game (Movement_Run 5.0 m/s and
@@ -31,11 +33,11 @@ pub struct Skill {
 /// shows on the character screen. The others write their slots on the server; whether the
 /// client uses them (gliding and casting are computed on the client) is not tested yet.
 pub const SKILLS: [Skill; 5] = [
-    Skill { key: "mining", name: "Mining", slots: &[("ToolDamageMod_Wood", 0.05), ("ToolDamageMod_Stone", 0.05), ("ToolDamageMod_Metal", 0.05)], max_rank: 20, effect: "+5 % tool damage on wood, stone and metal", verified: false },
-    Skill { key: "glide", name: "Glider endurance", slots: &[("StaminaDepletionMod_Glider", -0.03)], max_rank: 20, effect: "3 % less stamina used while gliding", verified: false },
-    Skill { key: "stamina", name: "Stamina", slots: &[("Stamina_Max_Adder", 10.0)], max_rank: 30, effect: "+10 maximum stamina", verified: true },
-    Skill { key: "speed", name: "Movement speed", slots: &[("Movement_Run", 0.1), ("Movement_Sprint", 0.17)], max_rank: 15, effect: "+2 % running and sprinting speed", verified: true },
-    Skill { key: "cast", name: "Cast speed", slots: &[("RangedCombat_Spell_ChargeDurationMod", -0.03), ("RangedCombat_Spell_FireDurationMod", -0.03)], max_rank: 15, effect: "3 % faster spell charge and cast", verified: false },
+    Skill { key: "mining", name: "Mining", slots: &[("ToolDamageMod_Wood", 0.05), ("ToolDamageMod_Stone", 0.05), ("ToolDamageMod_Metal", 0.05)], max_rank: 20, effect: "+5 % tool damage on wood, stone and metal", verified: false, icon: 0xfa13_85f4 }, // Pickaxe Specialization
+    Skill { key: "glide", name: "Glider endurance", slots: &[("StaminaDepletionMod_Glider", -0.03)], max_rank: 20, effect: "3 % less stamina used while gliding", verified: false, icon: 0xb81e_3dcc }, // Updraft
+    Skill { key: "stamina", name: "Stamina", slots: &[("Stamina_Max_Adder", 10.0)], max_rank: 30, effect: "+10 maximum stamina", verified: true, icon: 0xf2a8_b9be }, // Athlete
+    Skill { key: "speed", name: "Movement speed", slots: &[("Movement_Run", 0.1), ("Movement_Sprint", 0.17)], max_rank: 15, effect: "+2 % running and sprinting speed", verified: true, icon: 0xc4f9_ee05 }, // Splash Dash
+    Skill { key: "cast", name: "Cast speed", slots: &[("RangedCombat_Spell_ChargeDurationMod", -0.03), ("RangedCombat_Spell_FireDurationMod", -0.03)], max_rank: 15, effect: "3 % faster spell charge and cast", verified: false, icon: 0x4826_aafc }, // Wand Specialization
 ];
 
 /// The `X_Base` slot of each of [`STATS`]: what skill nodes raise.

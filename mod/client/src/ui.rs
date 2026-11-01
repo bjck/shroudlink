@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use chestsort_common::log;
 use serde_json::Value;
-use shroudlink::ui::{Event, HudRow, MenuEntry, Node, ToClient, UiEvent, Window};
+use shroudlink::ui::{Event, HudRow, MenuEntry, Node, ToClient, TreeLink, TreeNode, UiEvent, Window};
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -37,6 +37,10 @@ pub struct UiState {
     last_screen: u8,
     /// mod tabs after MODS in the player menu: (owner, entry id, label)
     pub tabs: Vec<(String, String, String)>,
+    /// mod skill trees: owner, id, version (changes with every update), nodes, links
+    pub trees: Vec<(String, String, u64, Vec<TreeNode>, Vec<TreeLink>)>,
+    /// their point counters ([in use, available]) and emblem tints, by owner and id
+    pub tree_extras: Vec<(String, String, Option<[u32; 2]>, Option<u32>)>,
 }
 
 #[derive(Clone)]
@@ -55,7 +59,8 @@ impl Hud {
     }
 }
 
-pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), huds: Vec::new(), drag: None, last_screen: 0, tabs: Vec::new() });
+pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), huds: Vec::new(), drag: None, last_screen: 0, tabs: Vec::new(), trees: Vec::new(), tree_extras: Vec::new() });
+static TREE_VERSION: AtomicU64 = AtomicU64::new(1);
 
 /// What the UI shows, for test automation.
 pub fn snapshot() -> Value {
@@ -191,6 +196,32 @@ pub fn mods_page_open() -> bool {
 /// The MODS page with its list of mods is open (not a mod tab's page).
 pub fn mods_list_open() -> bool {
     mods_page_open() && PAGE_TAB.load(Ordering::Relaxed) == NO_TAB
+}
+
+/// The open mod tab shows a skill tree (the game's SKILLS page with the mod's nodes).
+pub fn tree_tab_open() -> bool {
+    shown_tree_key().is_some()
+}
+
+fn shown_tree_key() -> Option<(String, String)> {
+    if !mods_page_open() {
+        return None;
+    }
+    let ui = UI.lock().unwrap();
+    let (owner, id, _) = ui.tabs.get(PAGE_TAB.load(Ordering::Relaxed) as usize)?;
+    ui.trees.iter().any(|t| &t.0 == owner && &t.1 == id).then(|| (owner.clone(), id.clone()))
+}
+
+/// The shown mod tree's point counter ([in use, available]) and emblem tint.
+pub fn shown_tree_extras() -> Option<(Option<[u32; 2]>, Option<u32>)> {
+    let (owner, id) = shown_tree_key()?;
+    UI.lock().unwrap().tree_extras.iter().find(|t| t.0 == owner && t.1 == id).map(|t| (t.2, t.3))
+}
+
+/// The mod tree to show on the SKILLS page now: owner, id, version, nodes, links.
+pub fn shown_tree() -> Option<(String, String, u64, Vec<TreeNode>, Vec<TreeLink>)> {
+    let (owner, id) = shown_tree_key()?;
+    UI.lock().unwrap().trees.iter().find(|t| t.0 == owner && t.1 == id).cloned()
 }
 
 /// Labels of the mod tabs and whether each one's page is open.
@@ -356,6 +387,15 @@ fn handle(message: &Value) {
                 (None, true) => {}
             }
         }
+        ToClient::SkillTree { owner, id, nodes, links, points, tint } => {
+            ui.trees.retain(|t| !(t.0 == owner && t.1 == id));
+            ui.tree_extras.retain(|t| !(t.0 == owner && t.1 == id));
+            if !nodes.is_empty() {
+                ui.tree_extras.push((owner.clone(), id.clone(), points, tint));
+                let version = TREE_VERSION.fetch_add(1, Ordering::Relaxed);
+                ui.trees.push((owner, id, version, nodes, links));
+            }
+        }
         ToClient::Notify { owner, text } => {
             log!("ui: {owner} notifies \"{text}\"");
             if !crate::switches::is_on(&owner) {
@@ -465,8 +505,11 @@ pub fn draw(api: &Api) {
             crate::input::set_focus(false);
         }
         ui.notes.retain(|(_, at)| at.elapsed() < Duration::from_secs(NOTE_SECONDS));
+        // a mod tree's tab shows the game's SKILLS page itself: nothing of ours over it
+        let tree_page = ui.tabs.get(PAGE_TAB.load(Ordering::Relaxed) as usize).is_some_and(|t| ui.trees.iter().any(|tr| tr.0 == t.0 && tr.1 == t.1));
         unsafe {
-            if page {
+            if page && tree_page {
+            } else if page {
                 draw_page(&mut d, &mut ui, &mut pending);
                 // the game's tooltip opens its own layer above the page
                 api.draw_item_tip();
@@ -861,8 +904,16 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     // opaque: the game's own tab is drawn behind the page
     api.background(&mut page, PAGE_STYLE, PAGE_ALPHA);
 
-    // a mod tab's page: that mod's windows alone, over the full width
+    // a mod tab's page: that mod's windows alone, over the full width; a mod tree is drawn
+    // by the game's SKILLS page instead (skilltree.rs)
     let tab = ui.tabs.get(PAGE_TAB.load(Ordering::Relaxed) as usize).cloned();
+    if tab.as_ref().is_some_and(|t| ui.trees.iter().any(|tr| tr.0 == t.0 && tr.1 == t.1)) {
+        api.close_frame(&mut page);
+        api.close_frame(&mut column);
+        api.close_frame(&mut root_frame);
+        api.end_layer(&mut layer);
+        return;
+    }
     if let Some((owner, _, label)) = tab {
         let width = PAGE_WIDTH - PADDING[0] - PADDING[2];
         let mut content = Frame::new();

@@ -60,6 +60,13 @@ A mod can:
   widget; a click shows that entry's windows alone over the whole page, with the same
   `menu` event a click on the entry sends. Older addons ignore it, so keep the entry in
   the MODS list too. `mods/ascension` puts Paragon there.
+- show a **skill tree** on the game's own SKILLS page (`SkillTree`: nodes with position,
+  name, description, rank / max rank and an icon borrowed from a game skill by its id;
+  links; optionally the point counter and a tint for its emblem). A tab with the same id
+  shows it. The game draws it with its own nodes, lines, tooltips and camera; investing in
+  a node comes back as a `ui_event` click (window = tree id, node = node id), never as the
+  game's own unlock. The addon logs the game skills with an icon once ("skill tree
+  catalog" in `shroudlink_client.log`). How it works: `docs/research/skilltree-ui.md`.
 - players can switch a mod off in their addon (the [X] in the MODS page list, since 0.5.0):
   the addon then hides that mod's windows, backpack rows, HUD panels and messages and slot
   marks, and ignores its slot keys. Your mod is not told and keeps running for that player,
