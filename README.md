@@ -1,5 +1,21 @@
 # shroudlink
 
+> [!CAUTION]
+> **Bigger stacks (x10) or bigger chests (x2) on your server? Back up your saves before every game update.**
+>
+> A game update brings back the game's normal data files. If the server loads your world
+> before the patched files are back, the game **deletes everything above the normal stack
+> size and everything in the extra chest slots**. Characters that join such a server can lose
+> the same from their backpack. Without a backup it is gone for good.
+>
+> - **Server owners:** keep the host's auto update off. Stop the server, copy its
+>   `savegame` folder somewhere safe, then update with `UPDATE-SERVER.bat`, which does it
+>   in the safe order ([Game updates](docs/wiki/Server-Game-Updates.md)). Start the server
+>   only after the patched files are uploaded.
+> - **Players:** before you join after an update, copy your characters
+>   (`Steam\userdata\<your id>\1203620\remote\`) somewhere safe, and join only once the
+>   server owner says the server is patched.
+
 **Server mods for Enshrouded 1.0 dedicated servers, with their own MODS tab in the game.**
 Rename a chest "Food, Wood" and hold R: everything of those kinds goes in. Tell a
 survivor "make 5 Iron Bars" and they run the furnace with what is in your chests.
