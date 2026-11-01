@@ -1,10 +1,45 @@
 # shroudlink
 
-A mod framework for Enshrouded 1.0 dedicated servers: server mods talk to an optional
-client addon over the game's own netcode and show native in-game UI. Players without the
-addon play normally. Ships with **chestsort**, the mod it was built for.
+**Server mods for Enshrouded 1.0 dedicated servers, with their own MODS tab in the game.**
+Rename a chest "Food, Wood" and hold R: everything of those kinds goes in. Tell a
+survivor "make 5 Iron Bars" and they run the furnace with what is in your chests.
+Players without the addon join and play normally.
 
-![The MODS tab added to the player menu, showing the chestsort window](docs/screenshots/mods-tab.jpg)
+![The MODS tab: the base's survivors, the Farmer's orders, jobs and crops](docs/screenshots/assistants.gif)
+
+**[Download the latest release](https://github.com/bjck/shroudlink/releases/latest)** ·
+[Install for players](docs/wiki/Players-Installing-the-Addon.md) (1 minute) ·
+[Install on a server](docs/wiki/Server-Installation.md) ·
+[Write your own mod](docs/wiki/Modding-Getting-Started.md)
+
+## What you get
+
+| Mod | What it does | Needs the addon |
+|---|---|---|
+| **chestsort** | Chests sort by name: rename a chest to categories (`Food`, `Ores & Gems`, `Weapons, Armor`) and quick stack fills it. Equipped items are never deposited. | no |
+| **assistants** | Survivors run your base's stations on order, take ingredients from the chests and put results back. The Farmer harvests and replants, the Fisher fishes. | yes |
+| **storage** | All chests within 40 m as one grid; click an item to take it from every chest. | yes |
+| **meter** | Damage meter: last fight, this session, what killed you. | yes |
+| addon | Item search in chests (`/`), slot locks (`L`) that deposits never touch. | yes |
+
+## Is it safe?
+
+- **Open source** (MIT). Every release zip is built from this repository.
+- The server mod loads as a `steam_api64.dll` proxy and the addon as `dinput8.dll`. That
+  is how game mods get loaded without a launcher, which is also why some antivirus
+  programs are suspicious of it. Read the source or build it yourself (below).
+- The addon is **optional** and stays silent on servers without shroudlink. Uninstall =
+  delete `dinput8.dll`.
+- Server mods only use the game's own functions: the stations craft at their own speed,
+  nothing is created from nothing.
+- Not a cheat for public servers: it only does anything on servers that run it.
+
+## storage
+
+**MODS → Storage**: every chest within 40 m as one grid, largest stacks first, with a
+search. Click an item to take it from all chests at once.
+
+![Storage: 104 chests and 790 kinds of items in one grid, then a search for "iron"](docs/screenshots/storage.gif)
 
 ## chestsort
 
@@ -22,7 +57,7 @@ addon play normally. Ships with **chestsort**, the mod it was built for.
 
 **Search in chests** (`/`): items that don't match fade out, in your backpack and in the chest.
 
-![Chest screen with the search "gril" in the backpack panel: only grillable food stays visible](docs/screenshots/chest-search.jpg)
+![Chest screen: typing "ore", then "wood"; only matching items stay lit in backpack and chest](docs/screenshots/chest-search.gif)
 
 | Find which chest an item belongs in | Locked slots (gold rim) stay in your backpack |
 |---|---|
