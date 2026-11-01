@@ -1,0 +1,5 @@
+# The release workflow builds with this toolchain too, so local and released builds match.
+[toolchain]
+channel = "1.94.0"
+profile = "minimal"
+targets = ["x86_64-pc-windows-msvc"]
