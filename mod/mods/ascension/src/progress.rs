@@ -12,27 +12,30 @@ pub const STATS: [(&str, &str); 6] = [
     ("int", "Intelligence"),
 ];
 
-/// A Paragon skill: ranks bought with Paragon points, each adding `per_rank` to every slot
-/// in `slots` (attribute slot names, `shroudlink_sdk::attr`). Values are added on top of
-/// what the game, buffs and gear put there.
+/// A Paragon skill: ranks bought with Paragon points, each adding its amount to every
+/// slot in `slots` (attribute slot name, amount per rank; `shroudlink_sdk::attr`). Amounts
+/// are added on top of what the game, buffs and gear put there.
 pub struct Skill {
     pub key: &'static str,
     pub name: &'static str,
-    pub slots: &'static [&'static str],
-    pub per_rank: f64,
+    pub slots: &'static [(&'static str, f64)],
     pub max_rank: u32,
     /// what one rank does, for the page
     pub effect: &'static str,
+    /// tested in game: the player notices it
+    pub verified: bool,
 }
 
-/// The Paragon skills. Untested in game for players: the effects and their scale are a
-/// first guess (multipliers around 1.0) until the in-game test.
+/// The Paragon skills. Movement speed is measured in game (Movement_Run 5.0 m/s and
+/// Movement_Sprint 8.4 m/s for a player; Movement_Mod has no effect on players). Stamina
+/// shows on the character screen. The others write their slots on the server; whether the
+/// client uses them (gliding and casting are computed on the client) is not tested yet.
 pub const SKILLS: [Skill; 5] = [
-    Skill { key: "mining", name: "Mining", slots: &["ToolDamageMod_Wood", "ToolDamageMod_Stone", "ToolDamageMod_Metal"], per_rank: 0.05, max_rank: 20, effect: "+5 % tool damage on wood, stone and metal" },
-    Skill { key: "glide", name: "Glider endurance", slots: &["StaminaDepletionMod_Glider"], per_rank: -0.03, max_rank: 20, effect: "3 % less stamina used while gliding" },
-    Skill { key: "stamina", name: "Stamina", slots: &["Stamina_Max_Adder"], per_rank: 10.0, max_rank: 30, effect: "+10 maximum stamina" },
-    Skill { key: "speed", name: "Movement speed", slots: &["Movement_Mod"], per_rank: 0.02, max_rank: 15, effect: "+2 % movement speed" },
-    Skill { key: "cast", name: "Cast speed", slots: &["RangedCombat_Spell_ChargeDurationMod", "RangedCombat_Spell_FireDurationMod"], per_rank: -0.03, max_rank: 15, effect: "3 % faster spell charge and cast" },
+    Skill { key: "mining", name: "Mining", slots: &[("ToolDamageMod_Wood", 0.05), ("ToolDamageMod_Stone", 0.05), ("ToolDamageMod_Metal", 0.05)], max_rank: 20, effect: "+5 % tool damage on wood, stone and metal", verified: false },
+    Skill { key: "glide", name: "Glider endurance", slots: &[("StaminaDepletionMod_Glider", -0.03)], max_rank: 20, effect: "3 % less stamina used while gliding", verified: false },
+    Skill { key: "stamina", name: "Stamina", slots: &[("Stamina_Max_Adder", 10.0)], max_rank: 30, effect: "+10 maximum stamina", verified: true },
+    Skill { key: "speed", name: "Movement speed", slots: &[("Movement_Run", 0.1), ("Movement_Sprint", 0.17)], max_rank: 15, effect: "+2 % running and sprinting speed", verified: true },
+    Skill { key: "cast", name: "Cast speed", slots: &[("RangedCombat_Spell_ChargeDurationMod", -0.03), ("RangedCombat_Spell_FireDurationMod", -0.03)], max_rank: 15, effect: "3 % faster spell charge and cast", verified: false },
 ];
 
 /// The `X_Base` slot of each of [`STATS`]: what skill nodes raise.
@@ -198,8 +201,8 @@ impl Account {
             out.push((slot, points as f64));
         }
         for (skill, &rank) in SKILLS.iter().zip(&self.paragon) {
-            for &slot in skill.slots {
-                out.push((slot, skill.per_rank * rank as f64));
+            for &(slot, per_rank) in skill.slots {
+                out.push((slot, per_rank * rank as f64));
             }
         }
         out
@@ -289,7 +292,7 @@ mod tests {
         a.reset_paragon();
         assert_eq!(a.paragon_unspent(&s), 2);
         for skill in &SKILLS {
-            for slot in skill.slots {
+            for (slot, _) in skill.slots {
                 assert!(shroudlink_sdk::attr::id_of(slot).is_some(), "{slot} is an attribute");
             }
         }

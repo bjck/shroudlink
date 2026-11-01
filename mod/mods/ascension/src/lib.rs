@@ -223,7 +223,7 @@ impl Ascension {
                     content.push(Node::Row {
                         children: vec![
                             Node::Button { id: format!("learn:{}", skill.key), label: "+1".into() },
-                            Node::Text { text: format!("{} {}/{}: {} per rank", skill.name, a.paragon[i], skill.max_rank, skill.effect) },
+                            Node::Text { text: format!("{} {}/{}: {} per rank{}", skill.name, a.paragon[i], skill.max_rank, skill.effect, if skill.verified { "" } else { " (experimental)" }) },
                         ],
                     });
                 }
