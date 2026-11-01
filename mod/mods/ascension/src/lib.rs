@@ -35,6 +35,22 @@ const SAVE_EVERY: u32 = 30;
 /// ticks between checks for raised enemies that are gone
 const FORGET_EVERY: u32 = 30;
 
+/// The mod's two windows: Ascension (MODS menu) and Paragon (its own tab next to MODS).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Page {
+    Ascension,
+    Paragon,
+}
+
+impl Page {
+    fn id(self) -> &'static str {
+        match self {
+            Page::Ascension => "main",
+            Page::Paragon => "paragon",
+        }
+    }
+}
+
 /// What the mod added to one player entity in this server run.
 #[derive(Clone, Debug, PartialEq)]
 struct Applied {
@@ -56,8 +72,8 @@ pub struct Ascension {
     clients: Vec<u64>,
     /// client -> its player entity, as last seen
     players: HashMap<u64, u32>,
-    /// clients with the window open
-    open: Vec<u64>,
+    /// clients with a window open, and which
+    open: HashMap<u64, Page>,
     /// players at the cap without a known account, told once
     warned: Vec<u32>,
     dirty: bool,
@@ -194,7 +210,7 @@ impl Ascension {
         }
     }
 
-    fn window(&self, world: &World, client: u64) -> ToClient {
+    fn window(&self, world: &World, client: u64, page: Page) -> ToClient {
         let mut content = Vec::new();
         let player = self.players.get(&client).copied();
         let account = player.and_then(|p| world.player_account(p));
@@ -203,59 +219,84 @@ impl Ascension {
             (Some(_), None) => content.push(Node::Text { text: "Your shroudlink addon is too old to keep Ascension: please update it.".into() }),
             (Some(p), Some(account)) => {
                 let a = self.accounts.get(&account).cloned().unwrap_or_default();
-                content.push(Node::Heading { text: format!("Ascension {}", a.level) });
-                let at_cap = matches!((world.attribute(p, attr::LEVEL), world.attribute(p, attr::LEVEL_MAX)), (Some(l), Some(m)) if l >= m);
-                if !at_cap {
-                    content.push(Node::Text { text: "Ascension starts at the level cap: XP you earn past it counts here.".into() });
-                }
-                content.push(Node::Text { text: format!("XP {} / {} to Ascension {}", a.xp, ascension_required(a.level), a.level + 1) });
-                content.push(Node::Text { text: format!("Points to spend: {}  (each level gives {}, at most {} per attribute)", a.unspent(&self.settings), self.settings.points_per_level, self.settings.max_points_per_attribute) });
-                content.push(Node::Separator);
-                for (i, (key, name)) in STATS.iter().enumerate() {
-                    content.push(Node::Row {
-                        children: vec![Node::Button { id: format!("add:{key}"), label: "+1".into() }, Node::Text { text: format!("{name} +{}", a.points[i]) }],
-                    });
-                }
-                content.push(Node::Row { children: vec![Node::Button { id: "reset".into(), label: "Take all points back".into() }] });
-                content.push(Node::Separator);
-                content.push(Node::Heading { text: format!("Paragon: {} point(s) to spend", a.paragon_unspent(&self.settings)) });
-                for (i, skill) in SKILLS.iter().enumerate() {
-                    content.push(Node::Row {
-                        children: vec![
-                            Node::Button { id: format!("learn:{}", skill.key), label: "+1".into() },
-                            Node::Text { text: format!("{} {}/{}: {} per rank{}", skill.name, a.paragon[i], skill.max_rank, skill.effect, if skill.verified { "" } else { " (experimental)" }) },
-                        ],
-                    });
-                }
-                content.push(Node::Row { children: vec![Node::Button { id: "paragon_reset".into(), label: "Take all Paragon ranks back".into() }] });
-                content.push(Node::Separator);
-                let unlocked = a.unlocked_depth(&self.settings);
-                if unlocked == 0 {
-                    content.push(Node::Text { text: "Shroud Depths unlock with Ascension 1: enemies around you get stronger, your Ascension XP grows faster.".into() });
-                } else {
-                    let depth = a.depth(&self.settings);
-                    content.push(Node::Heading { text: format!("Shroud Depth {depth} of {unlocked}") });
-                    content.push(Node::Text {
-                        text: if depth == 0 {
-                            "Enemies as the game made them.".into()
-                        } else {
-                            format!("Enemies around you: +{} levels. Ascension XP: +{:.0} %.", depth * self.settings.levels_per_depth, self.settings.depth_xp_bonus * depth as f64 * 100.0)
-                        },
-                    });
-                    content.push(Node::Row {
-                        children: vec![Node::Button { id: "depth:-".into(), label: "Shallower".into() }, Node::Button { id: "depth:+".into(), label: "Deeper".into() }],
-                    });
+                match page {
+                    Page::Ascension => self.ascension_page(world, p, &a, &mut content),
+                    Page::Paragon => self.paragon_page(&a, &mut content),
                 }
             }
         }
-        ToClient::Open { owner: ID.into(), window: Window { id: "main".into(), title: "Ascension".into(), content } }
+        let title = match page {
+            Page::Ascension => "Ascension",
+            Page::Paragon => "Paragon",
+        };
+        ToClient::Open { owner: ID.into(), window: Window { id: page.id().into(), title: title.into(), content } }
+    }
+
+    fn ascension_page(&self, world: &World, player: u32, a: &Account, content: &mut Vec<Node>) {
+        content.push(Node::Heading { text: format!("Ascension {}", a.level) });
+        let at_cap = matches!((world.attribute(player, attr::LEVEL), world.attribute(player, attr::LEVEL_MAX)), (Some(l), Some(m)) if l >= m);
+        if !at_cap {
+            content.push(Node::Text { text: "Ascension starts at the level cap: XP you earn past it counts here.".into() });
+        }
+        content.push(Node::Text { text: format!("XP {} / {} to Ascension {}", a.xp, ascension_required(a.level), a.level + 1) });
+        content.push(Node::Text { text: format!("Points to spend: {}  (each level gives {}, at most {} per attribute)", a.unspent(&self.settings), self.settings.points_per_level, self.settings.max_points_per_attribute) });
+        content.push(Node::Separator);
+        for (i, (key, name)) in STATS.iter().enumerate() {
+            content.push(Node::Row {
+                children: vec![Node::Button { id: format!("add:{key}"), label: "+1".into() }, Node::Text { text: format!("{name} +{}", a.points[i]) }],
+            });
+        }
+        content.push(Node::Row { children: vec![Node::Button { id: "reset".into(), label: "Take all points back".into() }] });
+        content.push(Node::Separator);
+        let unlocked = a.unlocked_depth(&self.settings);
+        if unlocked == 0 {
+            content.push(Node::Text { text: "Shroud Depths unlock with Ascension 1: enemies around you get stronger, your Ascension XP grows faster.".into() });
+        } else {
+            let depth = a.depth(&self.settings);
+            content.push(Node::Heading { text: format!("Shroud Depth {depth} of {unlocked}") });
+            content.push(Node::Text {
+                text: if depth == 0 {
+                    "Enemies as the game made them.".into()
+                } else {
+                    format!("Enemies around you: +{} levels. Ascension XP: +{:.0} %.", depth * self.settings.levels_per_depth, self.settings.depth_xp_bonus * depth as f64 * 100.0)
+                },
+            });
+            content.push(Node::Row {
+                children: vec![Node::Button { id: "depth:-".into(), label: "Shallower".into() }, Node::Button { id: "depth:+".into(), label: "Deeper".into() }],
+            });
+        }
+    }
+
+    fn paragon_page(&self, a: &Account, content: &mut Vec<Node>) {
+        content.push(Node::Heading { text: format!("Paragon points to spend: {}", a.paragon_unspent(&self.settings)) });
+        content.push(Node::Text { text: format!("Every Ascension level gives {} Paragon point(s). Ranks improve what your character already does.", self.settings.paragon_per_level) });
+        content.push(Node::Separator);
+        for (i, skill) in SKILLS.iter().enumerate() {
+            content.push(Node::Row {
+                children: vec![
+                    Node::Button { id: format!("learn:{}", skill.key), label: "+1".into() },
+                    Node::Text { text: format!("{}  {}/{}{}", skill.name, a.paragon[i], skill.max_rank, if skill.verified { "" } else { "  (experimental)" }) },
+                ],
+            });
+            // the game's font has no filled box glyph: the ranks as text
+            content.push(Node::Text { text: format!("{} per rank", skill.effect) });
+        }
+        content.push(Node::Separator);
+        content.push(Node::Row { children: vec![Node::Button { id: "paragon_reset".into(), label: "Take all Paragon ranks back".into() }] });
     }
 
     fn refresh(&self, host: &mut Host) {
-        for &client in &self.open {
-            let window = self.window(&host.world(), client);
+        for (&client, &page) in &self.open {
+            let window = self.window(&host.world(), client, page);
             host.send(client, &window.to_message());
         }
+    }
+
+    /// Shows `page` to a client and closes the other window there.
+    fn show(&mut self, host: &mut Host, client: u64, page: Page) {
+        let other = if page == Page::Ascension { Page::Paragon } else { Page::Ascension };
+        host.send(client, &ToClient::Close { owner: ID.into(), id: other.id().into() }.to_message());
+        self.open.insert(client, page);
     }
 }
 
@@ -296,8 +337,8 @@ impl Mod for Ascension {
             if let Some(client) = self.client_of(player) {
                 let text = format!("Ascension {level}! A new attribute point waits in MODS > Ascension.");
                 events.send(client, &ToClient::Notify { owner: ID.into(), text }.to_message());
-                if self.open.contains(&client) {
-                    events.send(client, &self.window(&world, client).to_message());
+                if let Some(&page) = self.open.get(&client) {
+                    events.send(client, &self.window(&world, client, page).to_message());
                 }
             }
         }
@@ -305,13 +346,18 @@ impl Mod for Ascension {
 
     fn on_join(&mut self, host: &mut Host, client: u64) {
         self.clients.push(client);
-        let entries = ToClient::Entries { owner: ID.into(), entries: vec![MenuEntry { id: "open".into(), label: "Ascension".into() }] };
+        let entries = ToClient::Entries {
+            owner: ID.into(),
+            entries: vec![MenuEntry { id: "open".into(), label: "Ascension".into() }, MenuEntry { id: "paragon".into(), label: "Paragon".into() }],
+        };
         host.send(client, &entries.to_message());
+        // Paragon also as a tab of its own next to MODS (older addons ignore it and keep the entry)
+        host.send(client, &ToClient::Tab { owner: ID.into(), id: "paragon".into(), label: "Paragon".into() }.to_message());
     }
 
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
         self.clients.retain(|&c| c != client);
-        self.open.retain(|&c| c != client);
+        self.open.remove(&client);
         if let Some(player) = self.players.remove(&client) {
             self.applied.remove(&player);
         }
@@ -319,22 +365,27 @@ impl Mod for Ascension {
     }
 
     fn on_message(&mut self, host: &mut Host, client: u64, message: &Value) {
-        let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
+        let Some(UiEvent { window, node, event }) = UiEvent::from_message(message) else { return };
         if matches!(event, Event::Closed) {
-            self.open.retain(|&c| c != client);
+            self.open.remove(&client);
             return;
         }
+        let mut page = if window == Page::Paragon.id() { Page::Paragon } else { Page::Ascension };
         let world = host.world();
         let player = world.player_of(client);
         if let Some(p) = player {
             self.players.insert(client, p);
         }
         let account = player.and_then(|p| world.player_account(p));
+        drop(world);
         match (node.as_str(), &event, account) {
             ("open", Event::Menu, _) => {
-                if !self.open.contains(&client) {
-                    self.open.push(client);
-                }
+                page = Page::Ascension;
+                self.show(host, client, page);
+            }
+            ("paragon", Event::Menu, _) => {
+                page = Page::Paragon;
+                self.show(host, client, page);
             }
             ("depth:-" | "depth:+", Event::Click { .. }, Some(account)) => {
                 let a = self.accounts.entry(account).or_default();
@@ -369,11 +420,11 @@ impl Mod for Ascension {
             _ => return,
         }
         if let (Some(p), Some(account)) = (player, account) {
-            if self.sync(&world, p, account) {
+            if self.sync(&host.world(), p, account) {
                 self.save();
             }
         }
-        let window = self.window(&host.world(), client);
+        let window = self.window(&host.world(), client, page);
         host.send(client, &window.to_message());
     }
 

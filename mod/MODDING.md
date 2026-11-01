@@ -55,6 +55,11 @@ A mod can:
   to `fraction`), also while playing, bottom right and see-through; players drag it while
   a menu is open and the addon keeps where. Send it again when it changes, with no rows to
   remove it; older addons ignore it. The damage meter's fight panel is one (`mods/meter`).
+- give a menu entry a **tab of its own** in the player menu, after MODS (`Tab`: owner, the
+  entry's id, a label; an empty label removes it). The addon draws it with the game's tab
+  widget; a click shows that entry's windows alone over the whole page, with the same
+  `menu` event a click on the entry sends. Older addons ignore it, so keep the entry in
+  the MODS list too. `mods/ascension` puts Paragon there.
 - players can switch a mod off in their addon (the [X] in the MODS page list, since 0.5.0):
   the addon then hides that mod's windows, backpack rows, HUD panels and messages and slot
   marks, and ignores its slot keys. Your mod is not told and keeps running for that player,

@@ -519,14 +519,19 @@ static NATIVE_MODS_TAB: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 static KEY_OVERRIDE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 const MODS_TAB_LABEL: &str = "Mods";
 
+/// `KEY_OVERRIDE` value for a tab without a key: the key lookup reports none.
+const NO_KEY: u16 = u16::MAX;
+
 unsafe extern "system" fn key_resolve_hook(out: *mut u8, input: usize, action: u32) -> *mut u8 {
     let api = API.get().unwrap();
     let r = api.key_resolve.as_ref().unwrap().call(out, input, action);
     let code = KEY_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
     if code != 0 && !out.is_null() {
         std::ptr::write_bytes(out, 0, KEY_DESC_SIZE);
-        *out = 1;
-        *(out.add(2) as *mut u16) = code;
+        if code != NO_KEY {
+            *out = 1;
+            *(out.add(2) as *mut u16) = code;
+        }
     }
     r
 }
@@ -541,7 +546,7 @@ unsafe fn draw_native_mods_tab(api: &Api) {
     *(entry.as_mut_ptr().add(TAB_LABEL) as *mut *const u8) = MODS_TAB_LABEL.as_ptr();
     *(entry.as_mut_ptr().add(TAB_LABEL_LEN) as *mut u64) = MODS_TAB_LABEL.len() as u64;
     *(entry.as_mut_ptr().add(TAB_KEY) as *mut u64) = shroudlink::string_id(b"shroudlinkModsTab");
-    entry[TAB_ACTIVE] = crate::ui::mods_page_open() as u8;
+    entry[TAB_ACTIVE] = crate::ui::mods_list_open() as u8;
     entry[TAB_MARKS] = 0;
     entry[TAB_MARKS + 1] = 0;
     crate::ui::mods_tab_drawn();
@@ -551,6 +556,23 @@ unsafe fn draw_native_mods_tab(api: &Api) {
     KEY_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
     if mouse_click_in(rect) {
         crate::ui::mods_tab_clicked();
+    }
+    // the mods' own tabs (Paragon …) after MODS, the same way, without a key
+    for (i, (label, open)) in crate::ui::mod_tabs().into_iter().enumerate() {
+        let mut entry = *TAB_TEMPLATE.lock().unwrap();
+        *(entry.as_mut_ptr().add(TAB_LABEL) as *mut *const u8) = label.as_ptr();
+        *(entry.as_mut_ptr().add(TAB_LABEL_LEN) as *mut u64) = label.len() as u64;
+        *(entry.as_mut_ptr().add(TAB_KEY) as *mut u64) = shroudlink::string_id(format!("shroudlinkModTab{i}").as_bytes());
+        entry[TAB_ACTIVE] = open as u8;
+        entry[TAB_MARKS] = 0;
+        entry[TAB_MARKS + 1] = 0;
+        let mut rect = [0f32; 4];
+        KEY_OVERRIDE.store(NO_KEY, std::sync::atomic::Ordering::Relaxed);
+        api.tab_widget.call(entry.as_mut_ptr(), rect.as_mut_ptr());
+        KEY_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
+        if mouse_click_in(rect) {
+            crate::ui::mod_tab_clicked(i);
+        }
     }
 }
 

@@ -35,6 +35,8 @@ pub struct UiState {
     /// The HUD panel being dragged: its key and its offsets when the drag began
     drag: Option<(String, (f32, f32))>,
     last_screen: u8,
+    /// mod tabs after MODS in the player menu: (owner, entry id, label)
+    pub tabs: Vec<(String, String, String)>,
 }
 
 #[derive(Clone)]
@@ -53,7 +55,7 @@ impl Hud {
     }
 }
 
-pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), huds: Vec::new(), drag: None, last_screen: 0 });
+pub static UI: Mutex<UiState> = Mutex::new(UiState { windows: Vec::new(), menu: Vec::new(), sections: Vec::new(), notes: Vec::new(), huds: Vec::new(), drag: None, last_screen: 0, tabs: Vec::new() });
 
 /// What the UI shows, for test automation.
 pub fn snapshot() -> Value {
@@ -131,6 +133,10 @@ const TEXT_INPUT_MAX: usize = 64;
 /// Background of text fields: blue panel with a fine edge.
 /// Index into the mod menu of the entry shown on the page.
 static PAGE_SELECTED: AtomicU64 = AtomicU64::new(0);
+/// The mod tab whose page is open (index into `UiState::tabs`); `NO_TAB`: the MODS page
+/// with its list of mods.
+static PAGE_TAB: AtomicU64 = AtomicU64::new(NO_TAB);
+const NO_TAB: u64 = u64::MAX;
 
 /// Development hot reload: the page state survives in the process environment.
 const PAGE_VAR: &str = "SHROUDLINK_PAGE";
@@ -182,6 +188,31 @@ pub fn mods_page_open() -> bool {
     PAGE_OPEN.load(Ordering::Relaxed)
 }
 
+/// The MODS page with its list of mods is open (not a mod tab's page).
+pub fn mods_list_open() -> bool {
+    mods_page_open() && PAGE_TAB.load(Ordering::Relaxed) == NO_TAB
+}
+
+/// Labels of the mod tabs and whether each one's page is open.
+pub fn mod_tabs() -> Vec<(String, bool)> {
+    let open = if mods_page_open() { PAGE_TAB.load(Ordering::Relaxed) } else { NO_TAB };
+    UI.lock().unwrap().tabs.iter().enumerate().map(|(i, t)| (t.2.clone(), open == i as u64)).collect()
+}
+
+/// A mod tab was clicked: its page opens (a second click closes it).
+pub fn mod_tab_clicked(index: usize) {
+    if mods_page_open() && PAGE_TAB.load(Ordering::Relaxed) == index as u64 {
+        set_page_open(false);
+        return;
+    }
+    let Some((owner, id, label)) = UI.lock().unwrap().tabs.get(index).cloned() else { return };
+    log!("ui: {owner} tab '{label}' opened");
+    PAGE_TAB.store(index as u64, Ordering::Relaxed);
+    PAGE_OPEN.store(true, Ordering::Relaxed);
+    save_page();
+    crate::link::send(UiEvent { window: String::new(), node: id, event: Event::Menu }.to_message(&owner));
+}
+
 /// Draws the MODS tab inside the player menu tab row (called from the tab widget hook)
 /// when the game cannot draw it as one of its own tabs (`native::draw_native_mods_tab`).
 pub fn draw_mods_tab(api: &Api) {
@@ -202,7 +233,13 @@ pub fn draw_mods_tab(api: &Api) {
         let clicked = api.text_button(label, STYLE_TOP_TAB, shroudlink::string_id(b"shroudlinkModsTab"));
         api.close_frame(&mut tab);
         if clicked {
-            set_page_open(!mods_page_open());
+            mods_tab_clicked();
+        }
+        for (i, (label, open)) in mod_tabs().into_iter().enumerate() {
+            let label = if open { format!("» {label} «") } else { label };
+            if api.text_button(&label, STYLE_TOP_TAB, shroudlink::string_id(format!("shroudlinkModTab{i}").as_bytes())) {
+                mod_tab_clicked(i);
+            }
         }
     }
 }
@@ -212,14 +249,23 @@ pub fn mods_tab_drawn() {
     TAB_FRAME.store(FRAME.load(Ordering::Relaxed), Ordering::Relaxed);
 }
 
-/// The game-drawn MODS tab was clicked.
+/// The MODS tab was clicked: its page opens or closes; from a mod tab's page it switches
+/// to the MODS page.
 pub fn mods_tab_clicked() {
-    set_page_open(!mods_page_open());
+    if mods_page_open() && PAGE_TAB.load(Ordering::Relaxed) != NO_TAB {
+        PAGE_TAB.store(NO_TAB, Ordering::Relaxed);
+        set_page_open(true);
+    } else {
+        set_page_open(!mods_page_open());
+    }
 }
 
 /// Opens or closes the MODS page in the player menu (as a click on its tab does).
 fn set_page_open(open: bool) {
     PAGE_OPEN.store(open, Ordering::Relaxed);
+    if !open {
+        PAGE_TAB.store(NO_TAB, Ordering::Relaxed);
+    }
     save_page();
     if open {
         if let Some((owner, entry)) = UI.lock().unwrap().menu.get(PAGE_SELECTED.load(Ordering::Relaxed) as usize).cloned() {
@@ -232,6 +278,7 @@ fn set_page_open(open: bool) {
 /// player menu shows that tab's page again.
 pub fn game_tab_chosen() {
     PAGE_OPEN.store(false, Ordering::Relaxed);
+    PAGE_TAB.store(NO_TAB, Ordering::Relaxed);
     save_page();
 }
 
@@ -290,6 +337,21 @@ fn handle(message: &Value) {
                 (None, false) => {
                     log!("ui: {owner} shows HUD panel {id}");
                     ui.huds.push(Hud { owner, id, title, rows, rect: [0.0; 4] });
+                }
+                (None, true) => {}
+            }
+        }
+        ToClient::Tab { owner, id, label } => {
+            let at = ui.tabs.iter().position(|t| t.0 == owner && t.1 == id);
+            match (at, label.is_empty()) {
+                (Some(i), true) => {
+                    ui.tabs.remove(i);
+                    PAGE_TAB.store(NO_TAB, Ordering::Relaxed);
+                }
+                (Some(i), false) => ui.tabs[i].2 = label,
+                (None, false) => {
+                    log!("ui: {owner} adds the tab '{label}'");
+                    ui.tabs.push((owner, id, label));
                 }
                 (None, true) => {}
             }
@@ -382,6 +444,7 @@ pub fn draw(api: &Api) {
         if mods_page_open() && !menu_visible {
             // player menu closed (a game tab chosen closes the page in the player menu hook)
             PAGE_OPEN.store(false, Ordering::Relaxed);
+            PAGE_TAB.store(NO_TAB, Ordering::Relaxed);
             save_page();
         }
         let page = mods_page_open() && menu_visible;
@@ -797,6 +860,27 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     api.set_padding(&page, PADDING);
     // opaque: the game's own tab is drawn behind the page
     api.background(&mut page, PAGE_STYLE, PAGE_ALPHA);
+
+    // a mod tab's page: that mod's windows alone, over the full width
+    let tab = ui.tabs.get(PAGE_TAB.load(Ordering::Relaxed) as usize).cloned();
+    if let Some((owner, _, label)) = tab {
+        let width = PAGE_WIDTH - PADDING[0] - PADDING[2];
+        let mut content = Frame::new();
+        api.open_column(&mut content, &d.key("shroudlinkTabContent"), SPACING);
+        api.set_size(&content, width, PAGE_HEIGHT - PADDING[1] - PADDING[3]);
+        if crate::switches::is_on(&owner) {
+            let mut shown: Vec<&mut OpenWindow> = ui.windows.iter_mut().filter(|w| w.owner == owner).collect();
+            page::draw_windows(d, &owner, &mut shown, width, PAGE_HEIGHT - PADDING[1] - PADDING[3] - 10.0, &mut pending.events);
+        } else {
+            api.text(&format!("{label} is switched off on this PC: switch it on in MODS."), STYLE_TITLE);
+        }
+        api.close_frame(&mut content);
+        api.close_frame(&mut page);
+        api.close_frame(&mut column);
+        api.close_frame(&mut root_frame);
+        api.end_layer(&mut layer);
+        return;
+    }
 
 
     // left: one entry per mod menu item

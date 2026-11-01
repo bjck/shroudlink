@@ -128,6 +128,11 @@ pub enum ToClient {
     /// A small panel on the HUD, also while playing (bottom right; the player can drag it
     /// while a menu shows the cursor). Replaces the owner's panel `id`; no rows removes it.
     Hud { owner: String, id: String, title: String, rows: Vec<HudRow> },
+    /// A tab of its own in the player menu, after MODS: clicking it shows the page of the
+    /// owner's menu entry `id` alone (it gets the same `menu` event as a click on the
+    /// entry). An empty label removes it. Older addons ignore it: keep the entry in the
+    /// MODS menu too.
+    Tab { owner: String, id: String, label: String },
 }
 
 /// A message the addon sends to a mod about inventory slots.
