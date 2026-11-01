@@ -11,7 +11,7 @@ All paths are relative to the folder that contains `enshrouded_server.exe`.
 |---|---|
 | `steam_api64.dll` | the shroudlink core (replaces Steam's DLL and passes every call on to it) |
 | `steam_api64_o.dll` | Steam's original `steam_api64.dll`, renamed |
-| `shroudlink_mods/chestsort.dll` | the chestsort mod (and any other mods) |
+| `shroudlink_mods/*.dll` | the mods (chestsort, storage, meter, assistants, gemforge); remove one to switch it off |
 | `chestsort_categories.json` | the categories; created with the defaults if missing |
 | `enshrouded_server.kfc`, `enshrouded_server.kfc_resources` | optional data mods (chests ×2, stacks ×10), **tied to one game build** |
 
@@ -21,16 +21,21 @@ All paths are relative to the folder that contains `enshrouded_server.exe`.
 2. Rename the server's `steam_api64.dll` (Steam's original, about 300 KB) to
    `steam_api64_o.dll`. Skip this if `steam_api64_o.dll` already exists.
 3. Upload the core from the server package as `steam_api64.dll` (about 1 MB).
-4. Create the folder `shroudlink_mods/` and upload `chestsort.dll` into it.
+4. Upload the folder `shroudlink_mods/` from the server package, with all the mods in it,
+   and, on a first install, `chestsort_categories.json` (an update keeps your own).
 5. Optional: upload the data mod files for **exactly your server's build**. See
    [[Game updates|Server-Game-Updates]] for how to build them.
 6. Start the server and check `shroudlink.log`. It should contain:
    ```
+   shroudlink server 0.7.1 starting (loaded as steam_api64.dll)
    inventory hooks installed
-   shroudlink host ready (protocol 1) ...
    shroudlink: loaded mod 'chestsort' from ...
-   features: channel on, inventory on, move_all on, selftest on
+   shroudlink: mod 'chestsort' registered
+   ... (one pair for every mod)
+   features: channel on, inventory on, move_all on, game_events on, ...
    ```
+   A feature that says `off` lost its hook point in a game update: only that feature
+   is switched off (see `shroudlink_hooks.txt`).
 
 On a host where you upload by SFTP, replace a running file by uploading it as `x.new`,
 renaming the old one, then renaming `x.new` into place. Nothing has to be deleted.
