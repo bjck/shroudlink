@@ -91,6 +91,7 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `position(entity)` | position in metres `[x, y (up), z]` |
 | `teleport(entity, [x, y, z])` | moves it; a player sees itself there right away |
 | `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
+| `player_account(player) -> Option<u64>` | the player's SteamID64, reported by their addon (core v9, addons after 0.7.2): the key for progress a mod keeps per account, since entity ids change every session. It names the account, not the character, and the addon reports it itself |
 | `player_name(player)` | the player's Steam name, sent by their addon (core v5); `None` for players without the addon |
 | `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
 | `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
@@ -150,6 +151,6 @@ a length, and game calls are plain C functions taking the opaque `game` pointer 
 current callback.
 
 - v2 appended inventory events to the v1 layout, v3 appended game events, and v5
-  appended `on_tick` (`HostApi` v5: `apply_buff`; v6: `entities_near`, `move_items`; v7: `give_items`, `remove_items`; v8: `world_chest_name`; v9: `attribute`, `set_attribute`). The host still loads older mods; they
+  appended `on_tick` (`HostApi` v5: `apply_buff`; v6: `entities_near`, `move_items`; v7: `give_items`, `remove_items`; v8: `world_chest_name`; v9: `attribute`, `set_attribute`, `player_account`). The host still loads older mods; they
   get no callbacks their version does not know.
 - New host functions are only ever appended.

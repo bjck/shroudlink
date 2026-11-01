@@ -66,6 +66,7 @@ static API: HostApi = HostApi {
     world_chest_name: crate::world::api_chest_name,
     attribute: crate::attributes::api_attribute,
     set_attribute: crate::attributes::api_set_attribute,
+    player_account: crate::world::api_player_account,
 };
 
 /// Ticks handed to v5 mods, for the self-test.

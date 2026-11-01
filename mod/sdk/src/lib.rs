@@ -70,7 +70,7 @@ pub use events::{GameEvent, Known};
 /// tells its own version: functions newer than it must not be called (the SDK checks).
 /// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`; v6 appends
 /// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`;
-/// v8 `world_chest_name`; v9 `attribute` and `set_attribute`.
+/// v8 `world_chest_name`; v9 `attribute`, `set_attribute` and `player_account`.
 pub const ABI_VERSION: u32 = 9;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
@@ -176,6 +176,8 @@ pub struct HostApi {
     /// Writes an attribute slot and lets the game recompute what depends on it; false if
     /// refused (no such slot, the feature is off, a player's Level or Experience).
     pub set_attribute: unsafe extern "C" fn(entity: u32, id: u32, value: f64) -> bool,
+    /// The SteamID64 of a player's account as their addon reported it; 0: unknown.
+    pub player_account: unsafe extern "C" fn(player: u32) -> u64,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -415,6 +417,17 @@ impl World<'_> {
             unsafe { (self.api.world_chest_name)(entity, buf.as_mut_ptr(), buf.len()) };
         }
         (n != 0).then(|| String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned())
+    }
+
+    /// The Steam account (SteamID64) of a player, reported by their addon (addons after 0.7.2)
+    /// once it has identified the player: the key for progress a mod keeps per account,
+    /// as entity ids change every session. It names the account, not the character, and
+    /// the addon reports it itself (host v9). None for players without the addon.
+    pub fn player_account(&self, player: u32) -> Option<u64> {
+        if self.api.version < 9 {
+            return None;
+        }
+        Some(unsafe { (self.api.player_account)(player) }).filter(|&a| a != 0)
     }
 
     /// An attribute slot of an entity (`attr::LEVEL`, `attr::STRENGTH_BASE` …), None if the
@@ -800,11 +813,14 @@ pub mod testing {
     unsafe extern "C" fn set_attribute(_: u32, _: u32, _: f64) -> bool {
         false
     }
+    unsafe extern "C" fn player_account(_: u32) -> u64 {
+        0
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name, attribute, set_attribute },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name, attribute, set_attribute, player_account },
                 sent: Box::default(),
             }
         }

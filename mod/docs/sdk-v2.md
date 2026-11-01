@@ -14,7 +14,8 @@ scan already knows, so it never rescans on the game thread); v9 (feature `attrib
 `World::attribute` / `set_attribute` / `add_attribute`, any attribute slot of an entity
 (Level, Strength_Base, Health_Max_Adder, DamageMod_Multiplier …, ids in
 `shroudlink_sdk::attr`), written through the game's own setters so its formulas recompute
-what depends on them (`server/src/attributes.rs`).
+what depends on them (`server/src/attributes.rs`); `World::player_account`, a player's
+SteamID64 as their addon reports it (the key for progress kept per account).
 
 ## Goal
 
