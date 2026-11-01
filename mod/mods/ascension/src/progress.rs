@@ -12,6 +12,32 @@ pub const STATS: [(&str, &str); 6] = [
     ("int", "Intelligence"),
 ];
 
+/// A Paragon skill: ranks bought with Paragon points, each adding `per_rank` to every slot
+/// in `slots` (attribute slot names, `shroudlink_sdk::attr`). Values are added on top of
+/// what the game, buffs and gear put there.
+pub struct Skill {
+    pub key: &'static str,
+    pub name: &'static str,
+    pub slots: &'static [&'static str],
+    pub per_rank: f64,
+    pub max_rank: u32,
+    /// what one rank does, for the page
+    pub effect: &'static str,
+}
+
+/// The Paragon skills. Untested in game for players: the effects and their scale are a
+/// first guess (multipliers around 1.0) until the in-game test.
+pub const SKILLS: [Skill; 5] = [
+    Skill { key: "mining", name: "Mining", slots: &["ToolDamageMod_Wood", "ToolDamageMod_Stone", "ToolDamageMod_Metal"], per_rank: 0.05, max_rank: 20, effect: "+5 % tool damage on wood, stone and metal" },
+    Skill { key: "glide", name: "Glider endurance", slots: &["StaminaDepletionMod_Glider"], per_rank: -0.03, max_rank: 20, effect: "3 % less stamina used while gliding" },
+    Skill { key: "stamina", name: "Stamina", slots: &["Stamina_Max_Adder"], per_rank: 10.0, max_rank: 30, effect: "+10 maximum stamina" },
+    Skill { key: "speed", name: "Movement speed", slots: &["Movement_Mod"], per_rank: 0.02, max_rank: 15, effect: "+2 % movement speed" },
+    Skill { key: "cast", name: "Cast speed", slots: &["RangedCombat_Spell_ChargeDurationMod", "RangedCombat_Spell_FireDurationMod"], per_rank: -0.03, max_rank: 15, effect: "3 % faster spell charge and cast" },
+];
+
+/// The `X_Base` slot of each of [`STATS`]: what skill nodes raise.
+pub const BASE_SLOTS: [&str; 6] = ["Constitution_Base", "Spirit_Base", "Endurance_Base", "Strength_Base", "Dexterity_Base", "Intelligence_Base"];
+
 /// What the server owner can tune (`settings` in the file).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -19,6 +45,8 @@ pub struct Settings {
     pub xp_multiplier: f64,
     /// attribute points per Ascension level
     pub points_per_level: u32,
+    /// Paragon points per Ascension level
+    pub paragon_per_level: u32,
     /// points one attribute can take (the client shows primary attributes as one byte)
     pub max_points_per_attribute: u32,
     /// deepest Shroud Depth (until Breaches unlock depths, Ascension level N unlocks depth N)
@@ -33,7 +61,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { xp_multiplier: 1.0, points_per_level: 1, max_points_per_attribute: 100, max_depth: 20, levels_per_depth: 3, depth_xp_bonus: 0.1, depth_radius: 80.0 }
+        Settings { xp_multiplier: 1.0, points_per_level: 1, paragon_per_level: 1, max_points_per_attribute: 100, max_depth: 20, levels_per_depth: 3, depth_xp_bonus: 0.1, depth_radius: 80.0 }
     }
 }
 
@@ -43,6 +71,7 @@ impl Settings {
         Settings {
             xp_multiplier: v["xp_multiplier"].as_f64().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(d.xp_multiplier),
             points_per_level: v["points_per_level"].as_u64().map_or(d.points_per_level, |p| p.min(100) as u32),
+            paragon_per_level: v["paragon_per_level"].as_u64().map_or(d.paragon_per_level, |p| p.min(100) as u32),
             max_points_per_attribute: v["max_points_per_attribute"].as_u64().map_or(d.max_points_per_attribute, |p| p.min(200) as u32),
             max_depth: v["max_depth"].as_u64().map_or(d.max_depth, |p| p.min(100) as u32),
             levels_per_depth: v["levels_per_depth"].as_u64().map_or(d.levels_per_depth, |p| p.min(50) as u32),
@@ -55,6 +84,7 @@ impl Settings {
         json!({
             "xp_multiplier": self.xp_multiplier,
             "points_per_level": self.points_per_level,
+            "paragon_per_level": self.paragon_per_level,
             "max_points_per_attribute": self.max_points_per_attribute,
             "max_depth": self.max_depth,
             "levels_per_depth": self.levels_per_depth,
@@ -91,6 +121,8 @@ pub struct Account {
     pub points: [u32; 6],
     /// the Shroud Depth the player chose (0: vanilla)
     pub depth: u32,
+    /// ranks of each of [`SKILLS`]
+    pub paragon: [u32; SKILLS.len()],
 }
 
 impl Account {
@@ -99,12 +131,17 @@ impl Account {
         for (i, (key, _)) in STATS.iter().enumerate() {
             points[i] = v["points"][key].as_u64().unwrap_or(0) as u32;
         }
-        Account { level: v["level"].as_u64().unwrap_or(0) as u32, xp: v["xp"].as_u64().unwrap_or(0), points, depth: v["depth"].as_u64().unwrap_or(0) as u32 }
+        let mut paragon = [0u32; SKILLS.len()];
+        for (i, skill) in SKILLS.iter().enumerate() {
+            paragon[i] = v["paragon"][skill.key].as_u64().unwrap_or(0) as u32;
+        }
+        Account { level: v["level"].as_u64().unwrap_or(0) as u32, xp: v["xp"].as_u64().unwrap_or(0), points, depth: v["depth"].as_u64().unwrap_or(0) as u32, paragon }
     }
 
     pub fn to_json(&self) -> Value {
         let points: serde_json::Map<String, Value> = STATS.iter().zip(self.points).map(|((k, _), p)| (k.to_string(), json!(p))).collect();
-        json!({ "level": self.level, "xp": self.xp, "points": points, "depth": self.depth })
+        let paragon: serde_json::Map<String, Value> = SKILLS.iter().zip(self.paragon).map(|(s, r)| (s.key.to_string(), json!(r))).collect();
+        json!({ "level": self.level, "xp": self.xp, "points": points, "depth": self.depth, "paragon": paragon })
     }
 
     /// Adds Ascension XP; returns how many levels were gained.
@@ -134,6 +171,38 @@ impl Account {
         }
         self.points[i] += 1;
         true
+    }
+
+    pub fn paragon_unspent(&self, settings: &Settings) -> u32 {
+        (self.level * settings.paragon_per_level).saturating_sub(self.paragon.iter().sum())
+    }
+
+    /// Buys one rank of skill `i`; false if no point is left or the skill is at its maximum.
+    pub fn learn(&mut self, i: usize, settings: &Settings) -> bool {
+        if i >= SKILLS.len() || self.paragon_unspent(settings) == 0 || self.paragon[i] >= SKILLS[i].max_rank {
+            return false;
+        }
+        self.paragon[i] += 1;
+        true
+    }
+
+    /// Takes every Paragon rank back (free).
+    pub fn reset_paragon(&mut self) {
+        self.paragon = [0; SKILLS.len()];
+    }
+
+    /// What this account adds to each slot (by name): attribute points and Paragon ranks.
+    pub fn bonuses(&self) -> Vec<(&'static str, f64)> {
+        let mut out: Vec<(&'static str, f64)> = Vec::new();
+        for (slot, &points) in BASE_SLOTS.iter().zip(&self.points) {
+            out.push((slot, points as f64));
+        }
+        for (skill, &rank) in SKILLS.iter().zip(&self.paragon) {
+            for &slot in skill.slots {
+                out.push((slot, skill.per_rank * rank as f64));
+            }
+        }
+        out
     }
 
     /// The deepest depth this account may choose.
@@ -210,10 +279,30 @@ mod tests {
     }
 
     #[test]
+    fn paragon_ranks() {
+        let s = Settings::default();
+        let mut a = Account { level: 2, ..Account::default() };
+        assert!(a.learn(0, &s) && a.learn(0, &s));
+        assert!(!a.learn(1, &s), "no point left");
+        let mining: f64 = a.bonuses().iter().filter(|b| b.0 == "ToolDamageMod_Stone").map(|b| b.1).sum();
+        assert!((mining - 0.1).abs() < 1e-9);
+        a.reset_paragon();
+        assert_eq!(a.paragon_unspent(&s), 2);
+        for skill in &SKILLS {
+            for slot in skill.slots {
+                assert!(shroudlink_sdk::attr::id_of(slot).is_some(), "{slot} is an attribute");
+            }
+        }
+        for slot in BASE_SLOTS {
+            assert!(shroudlink_sdk::attr::id_of(slot).is_some(), "{slot} is an attribute");
+        }
+    }
+
+    #[test]
     fn json_round_trip() {
-        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2 };
+        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2, paragon: [1, 0, 2, 0, 0] };
         assert_eq!(Account::from_json(&a.to_json()), a);
-        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, depth_xp_bonus: 0.2, depth_radius: 60.0 };
+        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, paragon_per_level: 3, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, depth_xp_bonus: 0.2, depth_radius: 60.0 };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         assert_eq!(Settings::from_json(&json!({})), Settings::default());
     }

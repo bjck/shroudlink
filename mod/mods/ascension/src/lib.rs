@@ -1,14 +1,16 @@
 //! Ascension: XP past the level cap fills Ascension levels without end; each gives an
-//! attribute point the player puts on one of the six primary attributes
-//! (mod/docs/endgame.md).
+//! attribute point the player puts on one of the six primary attributes and a Paragon
+//! point for skills that improve what the character already does (mining, gliding,
+//! stamina, speed, casting) (mod/docs/endgame.md).
 //!
 //! - XP: the game discards XP at the cap (`player_level` zeroes the gain) but still sends
 //!   `XPGainedEvent`; XP of a player whose Level is at Level_Max counts here.
 //! - Key: the player's Steam account (`World::player_account`, reported by the addon),
 //!   as entity ids change every session. Characters of one account share it.
-//! - Points go onto `X_Base` (what skill nodes raise), never the Flame or derived slots.
-//!   `X_Base` is rebuilt when a player spawns: the mod adds its points to each player
-//!   entity once and adds them again when the slot drops by exactly that much (a rebuild).
+//! - Points go onto `X_Base` (what skill nodes raise), never the Flame or derived slots;
+//!   Paragon ranks onto the slots of their skill. Slots are rebuilt when a player spawns:
+//!   the mod adds its amount to each player entity once, on top of what the game, buffs and
+//!   gear put there, and adds it again when the slot drops by exactly that much (a rebuild).
 //!   What it added to which entity is saved with the server's process id, so a hot reload
 //!   does not add twice and a restart starts over.
 //! - Shroud Depths (`depths.rs`): a player picks a depth up to their Ascension level;
@@ -22,7 +24,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use depths::Depths;
-use progress::{ascension_required, Account, Settings, STATS};
+use progress::{ascension_required, Account, Settings, SKILLS, STATS};
 use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
 use shroudlink_sdk::{attr, export_mod, json, log, Events, GameEvent, Host, Known, Mod, Value, World};
 
@@ -33,16 +35,17 @@ const SAVE_EVERY: u32 = 30;
 /// ticks between checks for raised enemies that are gone
 const FORGET_EVERY: u32 = 30;
 
-/// `X_Base` slots of [`STATS`], in the same order.
-const BASE: [u32; 6] = [attr::CONSTITUTION_BASE, attr::SPIRIT_BASE, attr::ENDURANCE_BASE, attr::STRENGTH_BASE, attr::DEXTERITY_BASE, attr::INTELLIGENCE_BASE];
-
-/// Points added to one player entity in this server run.
+/// What the mod added to one player entity in this server run.
 #[derive(Clone, Debug, PartialEq)]
 struct Applied {
     account: u64,
-    points: [u32; 6],
-    /// `X_Base` right after the last look: a drop by exactly `points` is a rebuild
-    seen: [f64; 6],
+    /// slot id -> (amount added, the slot right after the last look: a drop by exactly the
+    /// amount is a rebuild)
+    slots: HashMap<u32, (f64, f64)>,
+}
+
+fn same(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-3 * a.abs().max(b.abs()).max(1.0)
 }
 
 #[derive(Default)]
@@ -77,12 +80,13 @@ impl Ascension {
         if v["session"]["pid"].as_u64() == Some(std::process::id() as u64) {
             for a in v["session"]["applied"].as_array().into_iter().flatten() {
                 let (Some(entity), Some(account)) = (a["entity"].as_u64(), a["account"].as_str().and_then(|s| s.parse().ok())) else { continue };
-                let mut applied = Applied { account, points: [0; 6], seen: [f64::NAN; 6] };
-                for i in 0..6 {
-                    applied.points[i] = a["points"][i].as_u64().unwrap_or(0) as u32;
-                    applied.seen[i] = a["seen"][i].as_f64().unwrap_or(f64::NAN);
-                }
-                self.applied.insert(entity as u32, applied);
+                let slots = a["slots"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|s| Some((s[0].as_u64()? as u32, (s[1].as_f64()?, s[2].as_f64().unwrap_or(f64::NAN)))))
+                    .collect();
+                self.applied.insert(entity as u32, Applied { account, slots });
             }
         }
         log!("ascension: {} account(s), {} player(s) with points this run", self.accounts.len(), self.applied.len());
@@ -93,7 +97,10 @@ impl Ascension {
         let applied: Vec<Value> = self
             .applied
             .iter()
-            .map(|(e, a)| json!({ "entity": e, "account": a.account.to_string(), "points": a.points, "seen": a.seen.map(|s| if s.is_finite() { json!(s) } else { Value::Null }) }))
+            .map(|(e, a)| {
+                let slots: Vec<Value> = a.slots.iter().map(|(id, (amount, seen))| json!([id, amount, if seen.is_finite() { json!(seen) } else { Value::Null }])).collect();
+                json!({ "entity": e, "account": a.account.to_string(), "slots": slots })
+            })
             .collect();
         let text = serde_json::to_string_pretty(&json!({
             "settings": self.settings.to_json(),
@@ -112,28 +119,48 @@ impl Ascension {
         self.players.iter().find(|(_, &p)| p == player).map(|(&c, _)| c)
     }
 
-    /// Adds or takes back points on a player's `X_Base` until they match the account's.
-    /// Returns whether anything was written.
+    /// Adds or takes back what the account gives (attribute points, Paragon ranks) until each
+    /// slot of the player holds it on top of its own value. Returns whether anything was written.
     fn sync(&mut self, world: &World, player: u32, account: u64) -> bool {
-        let desired = self.accounts.get(&account).map_or([0; 6], |a| a.points);
-        let entry = self.applied.entry(player).or_insert(Applied { account, points: [0; 6], seen: [f64::NAN; 6] });
-        if entry.account != account {
-            *entry = Applied { account, points: [0; 6], seen: [f64::NAN; 6] };
-        }
-        let mut wrote = false;
-        for i in 0..6 {
-            let Some(current) = world.attribute(player, BASE[i]) else { continue };
-            // the game rebuilt the slot (a spawn): our points are gone
-            if entry.points[i] > 0 && entry.seen[i].is_finite() && current == entry.seen[i] - entry.points[i] as f64 {
-                log!("ascension: player {player}'s {} was rebuilt, adding {} point(s) again", STATS[i].1, entry.points[i]);
-                entry.points[i] = 0;
+        let wanted: Vec<(u32, f64)> = self.accounts.get(&account).map_or_else(Vec::new, |a| {
+            let mut by_slot: Vec<(u32, f64)> = Vec::new();
+            for (name, amount) in a.bonuses() {
+                let Some(id) = attr::id_of(name) else { continue };
+                match by_slot.iter_mut().find(|s| s.0 == id) {
+                    Some(s) => s.1 += amount,
+                    None => by_slot.push((id, amount)),
+                }
             }
-            let delta = desired[i] as f64 - entry.points[i] as f64;
-            if delta != 0.0 && world.set_attribute(player, BASE[i], current + delta) {
-                entry.points[i] = desired[i];
+            by_slot
+        });
+        let entry = self.applied.entry(player).or_insert_with(|| Applied { account, slots: HashMap::new() });
+        if entry.account != account {
+            *entry = Applied { account, slots: HashMap::new() };
+        }
+        // slots the account no longer adds to are taken back too
+        let mut ids: Vec<u32> = wanted.iter().map(|w| w.0).collect();
+        let old: Vec<u32> = entry.slots.keys().filter(|id| !ids.contains(id)).copied().collect();
+        ids.extend(old);
+        let mut wrote = false;
+        for id in ids {
+            let want = wanted.iter().find(|w| w.0 == id).map_or(0.0, |w| w.1);
+            let Some(current) = world.attribute(player, id) else { continue };
+            let (mut added, seen) = entry.slots.get(&id).copied().unwrap_or((0.0, f64::NAN));
+            // the game rebuilt the slot (a spawn): what we added is gone
+            if added != 0.0 && seen.is_finite() && same(current, seen - added) {
+                log!("ascension: player {player}: slot {id:#010x} was rebuilt, adding {added} again");
+                added = 0.0;
+            }
+            if want != added && world.set_attribute(player, id, current + want - added) {
+                added = want;
                 wrote = true;
             }
-            entry.seen[i] = world.attribute(player, BASE[i]).unwrap_or(current);
+            let now = world.attribute(player, id).unwrap_or(current);
+            if added == 0.0 && want == 0.0 {
+                entry.slots.remove(&id);
+            } else {
+                entry.slots.insert(id, (added, now));
+            }
         }
         wrote
     }
@@ -190,6 +217,17 @@ impl Ascension {
                     });
                 }
                 content.push(Node::Row { children: vec![Node::Button { id: "reset".into(), label: "Take all points back".into() }] });
+                content.push(Node::Separator);
+                content.push(Node::Heading { text: format!("Paragon: {} point(s) to spend", a.paragon_unspent(&self.settings)) });
+                for (i, skill) in SKILLS.iter().enumerate() {
+                    content.push(Node::Row {
+                        children: vec![
+                            Node::Button { id: format!("learn:{}", skill.key), label: "+1".into() },
+                            Node::Text { text: format!("{} {}/{}: {} per rank", skill.name, a.paragon[i], skill.max_rank, skill.effect) },
+                        ],
+                    });
+                }
+                content.push(Node::Row { children: vec![Node::Button { id: "paragon_reset".into(), label: "Take all Paragon ranks back".into() }] });
                 content.push(Node::Separator);
                 let unlocked = a.unlocked_depth(&self.settings);
                 if unlocked == 0 {
@@ -306,13 +344,24 @@ impl Mod for Ascension {
                 log!("ascension: player {:?} chose Shroud Depth {chosen}", player);
                 self.dirty = true;
             }
+            ("paragon_reset", Event::Click { .. }, Some(account)) => {
+                self.accounts.entry(account).or_default().reset_paragon();
+                self.dirty = true;
+            }
             ("reset", Event::Click { .. }, Some(account)) => {
                 self.accounts.entry(account).or_default().reset();
                 self.dirty = true;
             }
             (id, Event::Click { .. }, Some(account)) => {
-                let Some(i) = id.strip_prefix("add:").and_then(|k| STATS.iter().position(|s| s.0 == k)) else { return };
-                if !self.accounts.entry(account).or_default().spend(i, &self.settings) {
+                let a = self.accounts.entry(account).or_default();
+                let done = if let Some(i) = id.strip_prefix("add:").and_then(|k| STATS.iter().position(|s| s.0 == k)) {
+                    a.spend(i, &self.settings)
+                } else if let Some(i) = id.strip_prefix("learn:").and_then(|k| SKILLS.iter().position(|s| s.key == k)) {
+                    a.learn(i, &self.settings)
+                } else {
+                    false
+                };
+                if !done {
                     return;
                 }
                 self.dirty = true;
