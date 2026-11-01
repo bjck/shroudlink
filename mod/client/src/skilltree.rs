@@ -45,6 +45,8 @@ const SIG_CLASS_HINTS: &str = "40 55 41 55 48 8D AC 24 98 FC FF FF 48 81 EC 68 0
 const SIG_CHROME: &str = "40 55 53 41 56 41 57 48 8D AC 24 A8 DF FF FF B8 58 21 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 05 ?? ?? ?? ?? 45 33 FF 0F 29 B4 24 40 21 00 00";
 /// `FUN_7ff7ee70fae0(item, colour_and_scale, ..)`: draws an item's icon; the second argument
 /// packs the colour (low u32, 0xAABBGGRR, white 0xffffffff) and the scale (high f32).
+/// `FUN_7ff7ee7c7970(mode, menu)`: the SKILLS page, every frame it is shown.
+const SIG_PAGE: &str = "48 8B C4 89 50 10 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 28 FF FF FF 48 81 EC A0 01 00 00 0F 29 70 A8 45 33 FF 0F 29 78 98";
 const SIG_ITEM_ICON: &str = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 4C 89 74 24 20 55 48 8D 6C 24 E0 48 81 EC 20 01 00 00 48 8B FA 8B D9 8B D1";
 /// The skill point item whose icon is the counter's emblem.
 const SKILL_POINT_ITEM: u32 = 0xf2ad_8315;
@@ -57,6 +59,7 @@ type FrameFn = unsafe extern "system" fn(state: *mut u8);
 type UnlockFn = unsafe extern "system" fn(entry: *mut u8, flag: u64);
 type InputFn = unsafe extern "system" fn(kind: u8, consume: u8) -> u64;
 type LocaFn = unsafe extern "system" fn(out: *mut UiStr, key: u32) -> *mut UiStr;
+type PageFn = unsafe extern "system" fn(mode: u32, menu: u32) -> u64;
 type ItemIconFn = unsafe extern "system" fn(item: u32, colour_and_scale: u64, a: u64, b: u64, c: u64, d: u64) -> u64;
 
 /// The tint to give item icons drawn now (inside the point counter of a mod tree), 0: none.
@@ -94,6 +97,7 @@ struct Hooks {
     loca: GenericDetour<LocaFn>,
     class_hints: GenericDetour<FrameFn>,
     chrome: GenericDetour<FrameFn>,
+    page: GenericDetour<PageFn>,
     item_icon: GenericDetour<ItemIconFn>,
     game_ui: usize,
 }
@@ -145,6 +149,7 @@ pub fn install(module: &Module, game_ui: usize) -> Result<(), String> {
             loca: GenericDetour::new(std::mem::transmute::<usize, LocaFn>(find(SIG_LOCA)?), loca_hook).map_err(|e| e.to_string())?,
             class_hints: GenericDetour::new(std::mem::transmute::<usize, FrameFn>(find(SIG_CLASS_HINTS)?), class_hints_hook).map_err(|e| e.to_string())?,
             chrome: GenericDetour::new(std::mem::transmute::<usize, FrameFn>(find(SIG_CHROME)?), chrome_hook).map_err(|e| e.to_string())?,
+            page: GenericDetour::new(std::mem::transmute::<usize, PageFn>(find(SIG_PAGE)?), page_hook).map_err(|e| e.to_string())?,
             item_icon: GenericDetour::new(std::mem::transmute::<usize, ItemIconFn>(find(SIG_ITEM_ICON)?), item_icon_hook).map_err(|e| e.to_string())?,
             game_ui,
         };
@@ -154,6 +159,7 @@ pub fn install(module: &Module, game_ui: usize) -> Result<(), String> {
         hooks.loca.enable().map_err(|e| e.to_string())?;
         hooks.class_hints.enable().map_err(|e| e.to_string())?;
         hooks.chrome.enable().map_err(|e| e.to_string())?;
+        hooks.page.enable().map_err(|e| e.to_string())?;
         hooks.item_icon.enable().map_err(|e| e.to_string())?;
     }
     log!("skill trees: mod trees can use the SKILLS page");
@@ -168,6 +174,7 @@ pub fn uninstall() {
             let _ = h.loca.disable();
             let _ = h.class_hints.disable();
             let _ = h.chrome.disable();
+            let _ = h.page.disable();
             let _ = h.item_icon.disable();
         }
     }
@@ -201,7 +208,9 @@ fn build(owner: &str, tree: &str, version: u64, nodes: &[TreeNode], links: &[Tre
         raw[0xc..0x10].copy_from_slice(&if n.description.is_empty() { 0 } else { desc_key }.to_le_bytes());
         raw[0x14..0x18].copy_from_slice(&n.x.to_le_bytes());
         raw[0x18..0x1c].copy_from_slice(&n.y.to_le_bytes());
-        // cost 0: the game's own point check never stops a mod node; the mod decides
+        // the cost only shows in the tooltip: investing in a mod node never reaches the
+        // game's own point check (unlock_hook), the mod decides
+        raw[0x1c..0x1e].copy_from_slice(&(n.cost.min(u16::MAX as u32) as u16).to_le_bytes());
         raw[0x1e] = look.map_or(3, |l| l.class);
         if let Some(l) = look.filter(|_| kind == 2) {
             raw[0x20..0x40].copy_from_slice(&l.icons);
@@ -331,13 +340,11 @@ unsafe fn player_skill_data(game_ui: usize) -> Option<*mut u8> {
     (!data.is_null()).then_some(data)
 }
 
-/// The page's point counter shows the mod tree's points (swapped in for this call only) and
-/// its emblem in the mod's tint.
-unsafe extern "system" fn chrome_hook(state: *mut u8) {
+/// While a mod tree is shown, the whole page (counter, tooltip) reads the mod's points:
+/// swapped into the player data for the page's call only.
+unsafe extern "system" fn page_hook(mode: u32, menu: u32) -> u64 {
     let hooks = HOOKS.get().unwrap();
-    let shown = STATE.lock().unwrap().installed.is_some_and(|(at, _)| at == state as usize);
-    let extras = if shown { crate::ui::shown_tree_extras() } else { None };
-    let (points, tint) = extras.unwrap_or((None, None));
+    let points = crate::ui::shown_tree_extras().and_then(|(points, _)| points);
     let data = points.and_then(|_| player_skill_data(hooks.game_ui));
     let mut saved = [0u32; 3];
     if let (Some(data), Some([in_use, available])) = (data, points) {
@@ -347,15 +354,24 @@ unsafe extern "system" fn chrome_hook(state: *mut u8) {
             *p.add(i) = v;
         }
     }
-    ICON_TINT.store(tint.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
-    hooks.chrome.call(state);
-    ICON_TINT.store(0, std::sync::atomic::Ordering::Relaxed);
+    let r = hooks.page.call(mode, menu);
     if let (Some(data), Some(_)) = (data, points) {
         let p = data.add(POINTS_TOTAL) as *mut u32;
         for (i, v) in saved.into_iter().enumerate() {
             *p.add(i) = v;
         }
     }
+    r
+}
+
+/// The page's point counter shows its emblem in the mod tree's tint.
+unsafe extern "system" fn chrome_hook(state: *mut u8) {
+    let hooks = HOOKS.get().unwrap();
+    let shown = STATE.lock().unwrap().installed.is_some_and(|(at, _)| at == state as usize);
+    let tint = if shown { crate::ui::shown_tree_extras().and_then(|(_, tint)| tint) } else { None };
+    ICON_TINT.store(tint.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+    hooks.chrome.call(state);
+    ICON_TINT.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 unsafe extern "system" fn item_icon_hook(item: u32, colour_and_scale: u64, a: u64, b: u64, c: u64, d: u64) -> u64 {

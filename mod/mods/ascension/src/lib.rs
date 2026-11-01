@@ -35,6 +35,8 @@ const TREE: &str = "paragon";
 /// Centre of the game's skill tree space and the radius of the Paragon ring around it.
 const TREE_CENTRE: (f32, f32) = (4000.0, 4000.0);
 const TREE_RADIUS: f32 = 520.0;
+/// How much further out a skill sits than the one it requires.
+const TREE_STEP: f32 = 360.0;
 /// The skill point emblem on the Paragon tree: purple (0xAABBGGRR; it multiplies the gold).
 const PARAGON_TINT: u32 = 0xffff_3080;
 const FILE: &str = "shroudlink_ascension.json";
@@ -312,24 +314,37 @@ impl Ascension {
     fn paragon_tree(&self, account: Option<&Account>) -> ToClient {
         let (cx, cy) = TREE_CENTRE;
         let unspent = account.map_or(0, |a| a.paragon_unspent(&self.settings));
-        let mut nodes = vec![TreeNode { id: "start".into(), x: cx, y: cy, name: "Paragon".into(), description: format!("{unspent} Paragon point(s) to spend."), rank: 0, max_rank: 0, icon: 0 }];
+        let mut nodes = vec![TreeNode { id: "start".into(), x: cx, y: cy, name: "Paragon".into(), description: format!("{unspent} Paragon point(s) to spend."), rank: 0, max_rank: 0, cost: 0, icon: 0 }];
         let mut links = Vec::new();
+        // skills without a requirement on the ring; the others further out on their parent's ray
+        let ring: Vec<&str> = SKILLS.iter().filter(|s| s.requires.is_none()).map(|s| s.key).collect();
+        let angle_of = |key: &str| ring.iter().position(|k| *k == key).map(|i| std::f32::consts::TAU * i as f32 / ring.len() as f32 - std::f32::consts::FRAC_PI_2);
         for (i, skill) in SKILLS.iter().enumerate() {
-            let angle = std::f32::consts::TAU * i as f32 / SKILLS.len() as f32 - std::f32::consts::FRAC_PI_2;
+            let (angle, radius) = match skill.requires {
+                None => (angle_of(skill.key).unwrap_or(0.0), TREE_RADIUS),
+                Some(parent) => (angle_of(parent).unwrap_or(0.0), TREE_RADIUS + TREE_STEP),
+            };
             let rank = account.map_or(0, |a| a.paragon[i]);
             nodes.push(TreeNode {
                 id: skill.key.into(),
-                x: cx + TREE_RADIUS * angle.cos(),
-                y: cy + TREE_RADIUS * angle.sin(),
+                x: cx + radius * angle.cos(),
+                y: cy + radius * angle.sin(),
                 name: skill.name.into(),
-                description: format!("{} per rank.{}", skill.effect, if skill.verified { "" } else { " (experimental)" }),
+                description: format!(
+                    "{} per rank. Costs {} Paragon point{} per rank.{}",
+                    skill.effect,
+                    skill.cost,
+                    if skill.cost == 1 { "" } else { "s" },
+                    if skill.verified { "" } else { " (experimental)" }
+                ),
                 rank,
                 max_rank: skill.max_rank,
+                cost: skill.cost,
                 icon: skill.icon,
             });
-            links.push(TreeLink { from: "start".into(), to: skill.key.into() });
+            links.push(TreeLink { from: skill.requires.unwrap_or("start").into(), to: skill.key.into() });
         }
-        let spent = account.map_or(0, |a| a.paragon.iter().sum());
+        let spent = account.map_or(0, |a| a.paragon_spent());
         ToClient::SkillTree { owner: ID.into(), id: TREE.into(), nodes, links, points: Some([spent, unspent]), tint: Some(PARAGON_TINT) }
     }
 

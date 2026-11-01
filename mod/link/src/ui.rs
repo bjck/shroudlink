@@ -83,6 +83,9 @@ pub struct TreeNode {
     /// 0: a start node (the small dot paths begin at, always unlocked)
     #[serde(default)]
     pub max_rank: u32,
+    /// What one rank costs, shown in the tooltip against the tree's available points
+    #[serde(default)]
+    pub cost: u32,
     /// The game skill node whose icon and frame colour this node borrows (its id, as the
     /// addon logs them: `shroudlink_client.log`, "skill tree catalog"); 0: a small node.
     #[serde(default)]
@@ -256,7 +259,7 @@ mod tests {
         let tree = ToClient::SkillTree {
             owner: "ascension".into(),
             id: "paragon".into(),
-            nodes: vec![TreeNode { id: "speed".into(), x: 4000.0, y: 3400.0, name: "Speed".into(), description: String::new(), rank: 2, max_rank: 15, icon: 0x53e6_1fff }],
+            nodes: vec![TreeNode { id: "speed".into(), x: 4000.0, y: 3400.0, name: "Speed".into(), description: String::new(), rank: 2, max_rank: 15, cost: 1, icon: 0x53e6_1fff }],
             links: vec![TreeLink { from: "start".into(), to: "speed".into() }],
             points: Some([10, 2]),
             tint: Some(0xffb0_60ff),

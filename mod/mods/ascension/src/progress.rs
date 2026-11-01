@@ -26,18 +26,25 @@ pub struct Skill {
     pub verified: bool,
     /// the game skill whose icon the node in the Paragon tree borrows (0: a small node)
     pub icon: u32,
+    /// Paragon points one rank costs
+    pub cost: u32,
+    /// the skill (key) that needs a rank first; the tree draws this one behind it
+    pub requires: Option<&'static str>,
 }
 
 /// The Paragon skills. Movement speed is measured in game (Movement_Run 5.0 m/s and
 /// Movement_Sprint 8.4 m/s for a player; Movement_Mod has no effect on players). Stamina
 /// shows on the character screen. The others write their slots on the server; whether the
 /// client uses them (gliding and casting are computed on the client) is not tested yet.
-pub const SKILLS: [Skill; 5] = [
-    Skill { key: "mining", name: "Mining", slots: &[("ToolDamageMod_Wood", 0.05), ("ToolDamageMod_Stone", 0.05), ("ToolDamageMod_Metal", 0.05)], max_rank: 20, effect: "+5 % tool damage on wood, stone and metal", verified: false, icon: 0xfa13_85f4 }, // Pickaxe Specialization
-    Skill { key: "glide", name: "Glider endurance", slots: &[("StaminaDepletionMod_Glider", -0.03)], max_rank: 20, effect: "3 % less stamina used while gliding", verified: false, icon: 0xb81e_3dcc }, // Updraft
-    Skill { key: "stamina", name: "Stamina", slots: &[("Stamina_Max_Adder", 10.0)], max_rank: 30, effect: "+10 maximum stamina", verified: true, icon: 0xf2a8_b9be }, // Athlete
-    Skill { key: "speed", name: "Movement speed", slots: &[("Movement_Run", 0.1), ("Movement_Sprint", 0.17)], max_rank: 15, effect: "+2 % running and sprinting speed", verified: true, icon: 0xc4f9_ee05 }, // Splash Dash
-    Skill { key: "cast", name: "Cast speed", slots: &[("RangedCombat_Spell_ChargeDurationMod", -0.03), ("RangedCombat_Spell_FireDurationMod", -0.03)], max_rank: 15, effect: "3 % faster spell charge and cast", verified: false, icon: 0x4826_aafc }, // Wand Specialization
+pub const SKILLS: [Skill; 6] = [
+    Skill { key: "mining", name: "Mining", slots: &[("ToolDamageMod_Wood", 0.05), ("ToolDamageMod_Stone", 0.05), ("ToolDamageMod_Metal", 0.05)], max_rank: 20, effect: "+5 % tool damage on wood, stone and metal", verified: false, icon: 0xfa13_85f4, cost: 1, requires: None }, // Pickaxe Specialization
+    Skill { key: "glide", name: "Glider endurance", slots: &[("StaminaDepletionMod_Glider", -0.03)], max_rank: 20, effect: "3 % less stamina used while gliding", verified: false, icon: 0x4475_e8dd, cost: 1, requires: None }, // Airborne Architect
+    Skill { key: "stamina", name: "Stamina", slots: &[("Stamina_Max_Adder", 10.0)], max_rank: 30, effect: "+10 maximum stamina", verified: true, icon: 0xf2a8_b9be, cost: 1, requires: None }, // Athlete
+    Skill { key: "speed", name: "Movement speed", slots: &[("Movement_Run", 0.1), ("Movement_Sprint", 0.17)], max_rank: 15, effect: "+2 % running and sprinting speed", verified: true, icon: 0xc4f9_ee05, cost: 1, requires: None }, // Splash Dash
+    Skill { key: "cast", name: "Cast speed", slots: &[("RangedCombat_Spell_ChargeDurationMod", -0.03), ("RangedCombat_Spell_FireDurationMod", -0.03)], max_rank: 15, effect: "3 % faster spell charge and cast", verified: false, icon: 0x4826_aafc, cost: 1, requires: None }, // Wand Specialization
+    // No attribute behind updraft charges is known yet (gliding runs on the client): ranks
+    // can be bought, the effect is still being researched.
+    Skill { key: "updraft", name: "Updraft boost", slots: &[], max_rank: 2, effect: "+2 updraft charges per glide (no effect yet)", verified: false, icon: 0xb81e_3dcc, cost: 3, requires: Some("glide") }, // Updraft
 ];
 
 /// The `X_Base` slot of each of [`STATS`]: what skill nodes raise.
@@ -182,13 +189,21 @@ impl Account {
         true
     }
 
-    pub fn paragon_unspent(&self, settings: &Settings) -> u32 {
-        (self.level * settings.paragon_per_level).saturating_sub(self.paragon.iter().sum())
+    /// Paragon points in ranks (each rank costs its skill's `cost`).
+    pub fn paragon_spent(&self) -> u32 {
+        SKILLS.iter().zip(self.paragon).map(|(s, r)| s.cost * r).sum()
     }
 
-    /// Buys one rank of skill `i`; false if no point is left or the skill is at its maximum.
+    pub fn paragon_unspent(&self, settings: &Settings) -> u32 {
+        (self.level * settings.paragon_per_level).saturating_sub(self.paragon_spent())
+    }
+
+    /// Buys one rank of skill `i`; false if its cost is not left, the skill is at its
+    /// maximum or the skill it requires has no rank.
     pub fn learn(&mut self, i: usize, settings: &Settings) -> bool {
-        if i >= SKILLS.len() || self.paragon_unspent(settings) == 0 || self.paragon[i] >= SKILLS[i].max_rank {
+        let Some(skill) = SKILLS.get(i) else { return false };
+        let required = skill.requires.is_none_or(|k| SKILLS.iter().position(|s| s.key == k).is_some_and(|r| self.paragon[r] > 0));
+        if self.paragon_unspent(settings) < skill.cost || self.paragon[i] >= skill.max_rank || !required {
             return false;
         }
         self.paragon[i] += 1;
@@ -288,6 +303,19 @@ mod tests {
     }
 
     #[test]
+    fn ranks_cost_and_require() {
+        let s = Settings::default();
+        let updraft = SKILLS.iter().position(|k| k.key == "updraft").unwrap();
+        let glide = SKILLS.iter().position(|k| k.key == "glide").unwrap();
+        let mut a = Account { level: 4, ..Account::default() };
+        assert!(!a.learn(updraft, &s), "needs a rank of glider endurance first");
+        assert!(a.learn(glide, &s));
+        assert!(a.learn(updraft, &s), "3 of the 3 points left");
+        assert_eq!(a.paragon_unspent(&s), 0);
+        assert!(!a.learn(updraft, &s), "the second rank costs 3 again");
+    }
+
+    #[test]
     fn paragon_ranks() {
         let s = Settings::default();
         let mut a = Account { level: 2, ..Account::default() };
@@ -309,7 +337,7 @@ mod tests {
 
     #[test]
     fn json_round_trip() {
-        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2, paragon: [1, 0, 2, 0, 0] };
+        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2, paragon: [1, 0, 2, 0, 0, 1] };
         assert_eq!(Account::from_json(&a.to_json()), a);
         let s = Settings { xp_multiplier: 2.0, points_per_level: 2, paragon_per_level: 3, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, torment_min_level: 40.0, depth_xp_bonus: 0.2, depth_radius: 60.0 };
         assert_eq!(Settings::from_json(&s.to_json()), s);
