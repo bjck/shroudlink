@@ -54,8 +54,10 @@ pub struct Settings {
     pub max_points_per_attribute: u32,
     /// deepest Shroud Depth (until Breaches unlock depths, Ascension level N unlocks depth N)
     pub max_depth: u32,
-    /// enemy levels added per depth
+    /// enemy levels added per Torment level above 1
     pub levels_per_depth: u32,
+    /// the level every hostile enemy has at least from Torment 1
+    pub torment_min_level: f64,
     /// extra Ascension XP per depth (0.1: +10 %)
     pub depth_xp_bonus: f64,
     /// metres around a player in which enemies are raised
@@ -64,7 +66,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { xp_multiplier: 1.0, points_per_level: 1, paragon_per_level: 1, max_points_per_attribute: 100, max_depth: 20, levels_per_depth: 3, depth_xp_bonus: 0.1, depth_radius: 80.0 }
+        Settings { xp_multiplier: 1.0, points_per_level: 1, paragon_per_level: 1, max_points_per_attribute: 100, max_depth: 20, levels_per_depth: 3, torment_min_level: 50.0, depth_xp_bonus: 0.1, depth_radius: 80.0 }
     }
 }
 
@@ -78,6 +80,7 @@ impl Settings {
             max_points_per_attribute: v["max_points_per_attribute"].as_u64().map_or(d.max_points_per_attribute, |p| p.min(200) as u32),
             max_depth: v["max_depth"].as_u64().map_or(d.max_depth, |p| p.min(100) as u32),
             levels_per_depth: v["levels_per_depth"].as_u64().map_or(d.levels_per_depth, |p| p.min(50) as u32),
+            torment_min_level: v["torment_min_level"].as_f64().filter(|l| l.is_finite() && *l >= 0.0).map_or(d.torment_min_level, |l| l.min(255.0)),
             depth_xp_bonus: v["depth_xp_bonus"].as_f64().filter(|b| b.is_finite() && *b >= 0.0).unwrap_or(d.depth_xp_bonus),
             depth_radius: v["depth_radius"].as_f64().filter(|r| r.is_finite() && *r > 0.0).map_or(d.depth_radius, |r| r.min(300.0)),
         }
@@ -91,6 +94,7 @@ impl Settings {
             "max_points_per_attribute": self.max_points_per_attribute,
             "max_depth": self.max_depth,
             "levels_per_depth": self.levels_per_depth,
+            "torment_min_level": self.torment_min_level,
             "depth_xp_bonus": self.depth_xp_bonus,
             "depth_radius": self.depth_radius,
         })
@@ -305,7 +309,7 @@ mod tests {
     fn json_round_trip() {
         let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2, paragon: [1, 0, 2, 0, 0] };
         assert_eq!(Account::from_json(&a.to_json()), a);
-        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, paragon_per_level: 3, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, depth_xp_bonus: 0.2, depth_radius: 60.0 };
+        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, paragon_per_level: 3, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, torment_min_level: 40.0, depth_xp_bonus: 0.2, depth_radius: 60.0 };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         assert_eq!(Settings::from_json(&json!({})), Settings::default());
     }

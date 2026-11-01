@@ -404,6 +404,14 @@ fn attribute_tests(report: &mut Report, around: u32, player: u32) {
         }
         (None, None) => report.skip("attribute f32", "no NPC with a float attribute group loaded"),
     }
+    // HostApi v9 loot boost: the hook is in place and takes a boost (no roll happens without players)
+    if hooks::available(Feature::Loot) {
+        let set = unsafe { crate::loot::api_set_loot_boost(50.0, 3.0, [0.8, 1.0, 1.2, 1.3, 1.5].as_ptr()) };
+        let cleared = unsafe { crate::loot::api_set_loot_boost(0.0, 0.0, std::ptr::null()) };
+        report.check("loot boost", if set && cleared { Ok(format!("set and cleared, {} roll(s) boosted so far", crate::loot::boosted())) } else { Err(format!("set {set}, cleared {cleared}")) });
+    } else {
+        report.skip("loot boost", "feature loot is off");
+    }
     // a player's Level and Experience travel with the character: never written
     let refused = attributes::set(player, attr::LEVEL, 1.0);
     report.check("attribute refuses player Level", match refused { Err(e) if e.contains("saved with the character") => Ok("not written".into()), other => Err(format!("{other:?}")) });

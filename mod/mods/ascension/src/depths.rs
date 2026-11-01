@@ -1,5 +1,6 @@
-//! Shroud Depths: hostile enemies around a player at depth `d` get `levels_per_depth * d`
-//! levels. The game does the rest: `enemy_scaling` rescales an enemy's health when its
+//! Torment (called depth in the code and the file): from Torment 1 hostile enemies around
+//! a player are at least `min_level` (50), and each Torment level above 1 adds
+//! `levels_per_depth` more; Torment 0 is the game's own. The game does the rest: `enemy_scaling` rescales an enemy's health when its
 //! Level changes (keeping the health percentage), its damage and the XP it gives follow
 //! Level, and the client shows the new level (tested: a wolf at 150 nearly one-shot a
 //! level 50 player). An enemy is raised once, never lowered while it lives; where players
@@ -27,9 +28,23 @@ pub struct Depths {
     pub raised: HashMap<u32, Raised>,
 }
 
-/// The level an enemy of level `base` gets at depth `depth`.
-pub fn target(base: f64, depth: u32, levels_per_depth: u32) -> f64 {
-    base + (depth * levels_per_depth) as f64
+/// The level an enemy of level `base` gets at Torment `depth`.
+pub fn target(base: f64, depth: u32, levels_per_depth: u32, min_level: f64) -> f64 {
+    if depth == 0 {
+        return base;
+    }
+    base.max(min_level) + ((depth - 1) * levels_per_depth) as f64
+}
+
+/// The loot boost at Torment `depth` (`World::set_loot_boost`): items at least `min_level`
+/// plus the same levels enemies get, and per Torment level 5 % fewer common, 5 % more rare,
+/// 8 % more epic and 15 % more legendary rolls. Torment 0: the game's own loot.
+pub fn loot(depth: u32, min_level: f64, levels_per_depth: u32) -> (f64, f64, [f64; 5]) {
+    if depth == 0 {
+        return (0.0, 0.0, [1.0; 5]);
+    }
+    let t = depth as f64;
+    (min_level, ((depth - 1) * levels_per_depth) as f64, [1.0 / (1.0 + 0.05 * t), 1.0, 1.0 + 0.05 * t, 1.0 + 0.08 * t, 1.0 + 0.15 * t])
 }
 
 fn hostile(world: &World, entity: u32) -> bool {
@@ -39,7 +54,7 @@ fn hostile(world: &World, entity: u32) -> bool {
 impl Depths {
     /// Raises the hostile enemies within `radius` of `player` to depth `depth`; returns how
     /// many were raised now.
-    pub fn sweep(&mut self, world: &World, player: u32, depth: u32, levels_per_depth: u32, radius: f64) -> u32 {
+    pub fn sweep(&mut self, world: &World, player: u32, depth: u32, levels_per_depth: u32, min_level: f64, radius: f64) -> u32 {
         let mut count = 0;
         for enemy in world.entities_near(player, radius, "EnemyScaling") {
             let Some(level) = world.attribute(enemy, attr::LEVEL) else { continue };
@@ -52,7 +67,7 @@ impl Depths {
                 Some(r) => (r.base, r.base_max),
                 None => (level, world.attribute(enemy, attr::LEVEL_MAX).unwrap_or(level)),
             };
-            let want = target(base, depth, levels_per_depth);
+            let want = target(base, depth, levels_per_depth, min_level);
             if want <= level {
                 continue;
             }
@@ -91,8 +106,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn depth_adds_levels() {
-        assert_eq!(target(45.0, 0, 3), 45.0);
-        assert_eq!(target(45.0, 20, 3), 105.0);
+    fn loot_gets_better_with_torment() {
+        assert_eq!(loot(0, 50.0, 3), (0.0, 0.0, [1.0; 5]));
+        let (min, add, rarity) = loot(3, 50.0, 3);
+        assert_eq!((min, add), (50.0, 6.0));
+        assert!(rarity[0] < 1.0 && rarity[4] > rarity[3] && rarity[3] > rarity[2] && rarity[2] > 1.0);
+    }
+
+    #[test]
+    fn torment_lifts_to_the_floor_then_adds() {
+        assert_eq!(target(1.0, 0, 3, 50.0), 1.0, "Torment 0 is vanilla");
+        assert_eq!(target(1.0, 1, 3, 50.0), 50.0);
+        assert_eq!(target(1.0, 4, 3, 50.0), 59.0);
+        assert_eq!(target(105.0, 1, 3, 50.0), 105.0, "stronger enemies keep their level");
+        assert_eq!(target(105.0, 2, 3, 50.0), 108.0);
     }
 }

@@ -33,6 +33,8 @@ pub enum Feature {
     Items,
     /// reading and writing attributes (Level, Strength_Base, DamageMod …) for mods
     Attributes,
+    /// better loot rolls for mods (`server/src/loot.rs`)
+    Loot,
 }
 
 impl Feature {
@@ -46,6 +48,7 @@ impl Feature {
             Feature::Buffs => "buffs",
             Feature::Items => "items",
             Feature::Attributes => "attributes",
+            Feature::Loot => "loot",
         }
     }
 }
@@ -90,6 +93,8 @@ pub const POINTS: &[HookPoint] = &[
     HookPoint { name: "attr_set_u32", feature: Feature::Attributes, signature: "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 41 8B F0 48 8B FA 4C 8B C2 48 8B D9 41 8B D1 48 8D 4C 24 20 E8 ?? ?? ?? ?? 0F B6 4C 24 20 84 C9 74 ?? 33 C0 84 C9 75 ?? EB ?? 48 8B 44 24 28 0F B7 40 0C 0F B7 D0 48 85 DB 74 ?? F6 43 06 01 74 ?? 0F B7 4B 04 48 03 CB 89 34 91" },
     // FUN_140111ef0(comp, registry, f32 value, attrId): sets a float slot and recomputes
     HookPoint { name: "attr_set_f32", feature: Feature::Attributes, signature: "48 89 5C 24 08 57 48 83 EC 40 48 8B FA 0F 29 74 24 30 48 8B D9 4C 8B C2 41 8B D1 48 8D 4C 24 20 0F 28 F2 E8 ?? ?? ?? ?? 0F B6 4C 24 20 84 C9 74 ?? 33 C0 84 C9 75 ?? EB ?? 48 8B 44 24 28 0F B7 40 0C 0F B7 D0 48 85 DB 74 ?? F6 43 06 01 74 ?? 0F B7 4B 04 48 03 CB F3 0F 11 34 91" },
+    // FUN_140166d60(out, gen, lootSys, defaults, req): the generator state of every loot roll
+    HookPoint { name: "loot_gen_init", feature: Feature::Loot, signature: "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 56 41 57 48 83 EC 20 48 8B 7C 24 60" },
     // FUN_14003aba0(ctx): zeroes an inventory context
     HookPoint { name: "init_ctx", feature: Feature::WorldContext, signature: "33 D2 33 C0 48 89 11 48 89 51 08 48 89 51 10 48 89 51 18 48 89 51 20 48 89 51 28 48 89 51 30 48 89 51 38 48 89 51 40 48 89 51 48 48 89 51 50 48 89 51 58 48 89 51 60 48 89 51 68 48 89 51 70 48 89 51 78 48 89 81 80 00 00 00" },
 ];
@@ -143,7 +148,7 @@ pub fn disable(feature: Feature, reason: String) {
     registry().disabled.insert(feature, reason);
 }
 
-pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::WorldContext, Feature::Buffs, Feature::Items, Feature::Attributes];
+pub const FEATURES: &[Feature] = &[Feature::Channel, Feature::Inventory, Feature::MoveAll, Feature::GameEvents, Feature::WorldContext, Feature::Buffs, Feature::Items, Feature::Attributes, Feature::Loot];
 
 /// The features that work, for addons and mods (none before the scan, e.g. in unit tests).
 pub fn working() -> Vec<&'static str> {

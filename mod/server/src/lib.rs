@@ -20,6 +20,7 @@ mod game_api;
 mod hooks;
 mod items;
 mod link_host;
+mod loot;
 mod mods;
 mod names;
 mod plugins;
@@ -160,6 +161,11 @@ fn init() {
     if hooks::available(hooks::Feature::Attributes) {
         if let Err(e) = attributes::install(&module) {
             hooks::disable(hooks::Feature::Attributes, e);
+        }
+    }
+    if hooks::available(hooks::Feature::Loot) {
+        if let Err(e) = loot::install() {
+            hooks::disable(hooks::Feature::Loot, e);
         }
     }
     selftest::install();

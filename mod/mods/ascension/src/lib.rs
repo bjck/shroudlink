@@ -13,8 +13,9 @@
 //!   gear put there, and adds it again when the slot drops by exactly that much (a rebuild).
 //!   What it added to which entity is saved with the server's process id, so a hot reload
 //!   does not add twice and a restart starts over.
-//! - Shroud Depths (`depths.rs`): a player picks a depth up to their Ascension level;
-//!   hostile enemies around them get more levels, and their Ascension XP a bonus.
+//! - Torment (`depths.rs`, "depth" in the code): a player picks a Torment level up to their
+//!   Ascension level; from Torment 1 hostile enemies around them are at least level 50 and
+//!   get stronger with each level, and their Ascension XP gets a bonus.
 //! - Saved in `shroudlink_ascension.json` next to the server (`.new`, then renamed).
 
 mod depths;
@@ -195,18 +196,23 @@ impl Ascension {
                 (depth > 0).then_some((p, depth))
             })
             .collect();
+        // loot follows the deepest Torment among the players online (the game's loot rolls
+        // carry no player; on a server of friends they mostly play together)
+        let deepest = deep.iter().map(|d| d.1).max().unwrap_or(0);
+        let (min_level, add_levels, rarity) = depths::loot(deepest, self.settings.torment_min_level, self.settings.levels_per_depth);
+        world.set_loot_boost(min_level, add_levels, rarity);
         if deep.is_empty() {
             if !self.depths.raised.is_empty() {
                 let lowered = self.depths.lower_all(world);
-                log!("ascension: nobody at a Shroud Depth, {lowered} enemy(s) back to their own level");
+                log!("ascension: nobody at a Torment level, {lowered} enemy(s) back to their own level");
             }
             return;
         }
         let (player, depth) = deep[self.sweep_next % deep.len()];
         self.sweep_next = self.sweep_next.wrapping_add(1);
-        let raised = self.depths.sweep(world, player, depth, self.settings.levels_per_depth, self.settings.depth_radius);
+        let raised = self.depths.sweep(world, player, depth, self.settings.levels_per_depth, self.settings.torment_min_level, self.settings.depth_radius);
         if raised > 0 {
-            log!("ascension: {raised} enemy(s) around player {player} raised to depth {depth} ({} raised in all)", self.depths.raised.len());
+            log!("ascension: {raised} enemy(s) around player {player} raised to Torment {depth} ({} raised in all)", self.depths.raised.len());
         }
     }
 
@@ -250,19 +256,26 @@ impl Ascension {
         content.push(Node::Separator);
         let unlocked = a.unlocked_depth(&self.settings);
         if unlocked == 0 {
-            content.push(Node::Text { text: "Shroud Depths unlock with Ascension 1: enemies around you get stronger, your Ascension XP grows faster.".into() });
+            content.push(Node::Text { text: "Torment unlocks with Ascension 1: enemies around you get stronger, your Ascension XP grows faster.".into() });
         } else {
             let depth = a.depth(&self.settings);
-            content.push(Node::Heading { text: format!("Shroud Depth {depth} of {unlocked}") });
+            content.push(Node::Heading { text: format!("Torment {depth} of {unlocked}") });
             content.push(Node::Text {
                 text: if depth == 0 {
                     "Enemies as the game made them.".into()
                 } else {
-                    format!("Enemies around you: +{} levels. Ascension XP: +{:.0} %.", depth * self.settings.levels_per_depth, self.settings.depth_xp_bonus * depth as f64 * 100.0)
+                    format!(
+                        "Enemies around you: at least level {:.0}{}. Loot: item level at least {:.0}{}, more rare, epic and legendary gear. Ascension XP: +{:.0} %.",
+                        self.settings.torment_min_level,
+                        if depth > 1 { format!(", then +{} levels", (depth - 1) * self.settings.levels_per_depth) } else { String::new() },
+                        self.settings.torment_min_level,
+                        if depth > 1 { format!(" +{}", (depth - 1) * self.settings.levels_per_depth) } else { String::new() },
+                        self.settings.depth_xp_bonus * depth as f64 * 100.0
+                    )
                 },
             });
             content.push(Node::Row {
-                children: vec![Node::Button { id: "depth:-".into(), label: "Shallower".into() }, Node::Button { id: "depth:+".into(), label: "Deeper".into() }],
+                children: vec![Node::Button { id: "depth:-".into(), label: "Torment -1".into() }, Node::Button { id: "depth:+".into(), label: "Torment +1".into() }],
             });
         }
     }
@@ -392,7 +405,7 @@ impl Mod for Ascension {
                 let now = a.depth(&self.settings);
                 let want = if node == "depth:+" { now + 1 } else { now.saturating_sub(1) };
                 let chosen = a.choose_depth(want, &self.settings);
-                log!("ascension: player {:?} chose Shroud Depth {chosen}", player);
+                log!("ascension: player {:?} chose Torment {chosen}", player);
                 self.dirty = true;
             }
             ("paragon_reset", Event::Click { .. }, Some(account)) => {

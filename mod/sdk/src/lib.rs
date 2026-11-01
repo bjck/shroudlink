@@ -70,7 +70,8 @@ pub use events::{GameEvent, Known};
 /// tells its own version: functions newer than it must not be called (the SDK checks).
 /// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`; v6 appends
 /// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`;
-/// v8 `world_chest_name`; v9 `attribute`, `set_attribute` and `player_account`.
+/// v8 `world_chest_name`; v9 `attribute`, `set_attribute`, `player_account` and
+/// `set_loot_boost`.
 pub const ABI_VERSION: u32 = 9;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
@@ -178,6 +179,9 @@ pub struct HostApi {
     pub set_attribute: unsafe extern "C" fn(entity: u32, id: u32, value: f64) -> bool,
     /// The SteamID64 of a player's account as their addon reported it; 0: unknown.
     pub player_account: unsafe extern "C" fn(player: u32) -> u64,
+    /// Lifts every following loot roll: at least `min_level`, plus `add_levels`, rarity
+    /// weights multiplied by `rarity[0..5]` (null: unchanged); all neutral switches it off.
+    pub set_loot_boost: unsafe extern "C" fn(min_level: f64, add_levels: f64, rarity: *const f64) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -428,6 +432,19 @@ impl World<'_> {
             return None;
         }
         Some(unsafe { (self.api.player_account)(player) }).filter(|&a| a != 0)
+    }
+
+    /// Makes the game's loot better from now on, for every roll on the server (enemy drops,
+    /// containers, world pickups; not crafting): item level at least `min_level`, plus
+    /// `add_levels`, and the five rarity weights (common, uncommon, rare, epic, legendary)
+    /// multiplied by `rarity`. Each item still clamps its level to its own range (most gear
+    /// stops at 55). `set_loot_boost(0.0, 0.0, [1.0; 5])` gives the game's own loot back.
+    /// False if the server cannot (host v9; the feature "loot").
+    pub fn set_loot_boost(&self, min_level: f64, add_levels: f64, rarity: [f64; 5]) -> bool {
+        if self.api.version < 9 {
+            return false;
+        }
+        unsafe { (self.api.set_loot_boost)(min_level, add_levels, rarity.as_ptr()) }
     }
 
     /// An attribute slot of an entity (`attr::LEVEL`, `attr::STRENGTH_BASE` …), None if the
@@ -816,11 +833,14 @@ pub mod testing {
     unsafe extern "C" fn player_account(_: u32) -> u64 {
         0
     }
+    unsafe extern "C" fn set_loot_boost(_: f64, _: f64, _: *const f64) -> bool {
+        false
+    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name, attribute, set_attribute, player_account },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name, attribute, set_attribute, player_account, set_loot_boost },
                 sent: Box::default(),
             }
         }

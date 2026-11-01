@@ -67,6 +67,7 @@ static API: HostApi = HostApi {
     attribute: crate::attributes::api_attribute,
     set_attribute: crate::attributes::api_set_attribute,
     player_account: crate::world::api_player_account,
+    set_loot_boost: crate::loot::api_set_loot_boost,
 };
 
 /// Ticks handed to v5 mods, for the self-test.
