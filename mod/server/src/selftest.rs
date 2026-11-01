@@ -180,6 +180,15 @@ unsafe fn run(ctx: *mut Ctx) {
     send(json!({ "mod": "shroudlink", "op": "name", "name": "Selftest", "steam_id": "76561198000000042" }));
     let account = crate::world::client_account(FAKE_CLIENT);
     report.check("addon Steam account", if account == Some(76561198000000042) { Ok("the session's SteamID64 is kept".into()) } else { Err(format!("got {account:?}")) });
+    let ascension = send(json!({ "mod": "ascension", "op": "ui_event", "event": { "window": "", "node": "open", "event": { "kind": "menu" } } }));
+    report.check(
+        "ascension window",
+        if welcome.iter().any(|m| m["op"] == "entries" && m["owner"] == "ascension") && ascension.iter().any(|m| m["op"] == "open" && m["window"]["title"] == "Ascension") {
+            Ok("menu entry, and the window opens".into())
+        } else {
+            Err(format!("got {ascension:?}"))
+        },
+    );
     let wave = send(json!({ "mod": "hello", "op": "ui_event", "event": { "window": "wave", "node": "wave", "event": { "kind": "click" } } }));
     report.check("notification", if wave.iter().any(|m| m["op"] == "notify") { Ok("Wave answers with a HUD message".into()) } else { Err(format!("got {wave:?}")) });
     let open = send(ui_event("", "categories", json!({ "kind": "menu" })));
