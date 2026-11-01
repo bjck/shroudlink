@@ -56,7 +56,7 @@ Players without the addon join and play normally.
 **MODS → Storage**: every chest within 40 m as one grid, largest stacks first, with a
 search. Click an item to take it from all chests at once.
 
-![Storage: 104 chests and 790 kinds of items in one grid, then a search for "iron"](docs/screenshots/storage.gif)
+![Storage: 136 chests and 745 kinds of items in one grid, then a search for "iron"](docs/screenshots/storage.gif)
 
 ## chestsort
 

@@ -21,8 +21,9 @@ backpack, the item in your hand and the action bar.
 
 ![MODS tab](https://raw.githubusercontent.com/bjck/shroudlink/main/docs/screenshots/mods-tab.jpg)
 
-The addon adds **MODS** to the player menu, next to SKILLS. On the left are the server's
-mods, on the right their windows. chestsort's **Chest categories** window:
+The addon adds **MODS** to the player menu, next to SKILLS: press **K**, also while
+playing, or click it. Click another tab, or step with Q and E, to leave it. On the left
+are the server's mods, on the right their windows. chestsort's **Chest categories** window:
 
 - lists every category with its number of items; click one to see its items;
 - has a search field: type an item name to see which category, and so which chest

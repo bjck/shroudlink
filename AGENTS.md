@@ -62,6 +62,24 @@ cargo test --workspace --exclude shroudlink-client   # protocol, sessions, mod l
 - An installed DLL that the running game has loaded cannot be overwritten. Rename it
   (`dinput8.old.dll`), then copy.
 
+## Releasing
+
+Releases are built by GitHub Actions (`.github/workflows/build.yml`), never from a local
+disk. Every push and pull request is tested and built there too.
+
+1. Set `version` in `mod/Cargo.toml` (`[workspace.package]`; every crate inherits it), then
+   `cargo build --release` so `Cargo.lock` follows (the workflow builds `--locked`).
+2. Unit tests and `selftest.py`; check the zips' READMEs (`dist/*/README.txt`), and
+   `SERVER_MODS` in `research/scripts/package.py` for the mods the server zip ships.
+3. Commit, push, wait for green; then `git tag v<version>` and push the tag. The tag must
+   match the version or packaging stops.
+4. The workflow attaches both zips, `SHA256SUMS.txt` and a build provenance attestation
+   to a **draft** release. Write the notes (for non-programmers: what changed, whether
+   players or the server must update, the stack-size warning) and publish it; publishing
+   is public and needs the owner's go-ahead.
+
+`python research/scripts/package.py` packs the same zips locally into `dist/build`.
+
 ## How the game code is found
 
 - Every hook point is located by a **byte signature** (`SIG_*` constants) at the function
