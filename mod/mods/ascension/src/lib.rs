@@ -11,13 +11,17 @@
 //!   entity once and adds them again when the slot drops by exactly that much (a rebuild).
 //!   What it added to which entity is saved with the server's process id, so a hot reload
 //!   does not add twice and a restart starts over.
+//! - Shroud Depths (`depths.rs`): a player picks a depth up to their Ascension level;
+//!   hostile enemies around them get more levels, and their Ascension XP a bonus.
 //! - Saved in `shroudlink_ascension.json` next to the server (`.new`, then renamed).
 
+mod depths;
 mod progress;
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use depths::Depths;
 use progress::{ascension_required, Account, Settings, STATS};
 use shroudlink_sdk::ui::{Event, MenuEntry, Node, ToClient, UiEvent, Window};
 use shroudlink_sdk::{attr, export_mod, json, log, Events, GameEvent, Host, Known, Mod, Value, World};
@@ -26,6 +30,8 @@ const ID: &str = "ascension";
 const FILE: &str = "shroudlink_ascension.json";
 /// ticks (about seconds) between saves of new XP
 const SAVE_EVERY: u32 = 30;
+/// ticks between checks for raised enemies that are gone
+const FORGET_EVERY: u32 = 30;
 
 /// `X_Base` slots of [`STATS`], in the same order.
 const BASE: [u32; 6] = [attr::CONSTITUTION_BASE, attr::SPIRIT_BASE, attr::ENDURANCE_BASE, attr::STRENGTH_BASE, attr::DEXTERITY_BASE, attr::INTELLIGENCE_BASE];
@@ -53,6 +59,9 @@ pub struct Ascension {
     warned: Vec<u32>,
     dirty: bool,
     ticks: u32,
+    depths: Depths,
+    /// round robin over the players at a depth, one sweep per tick
+    sweep_next: usize,
 }
 
 impl Ascension {
@@ -129,6 +138,35 @@ impl Ascension {
         wrote
     }
 
+    /// Raises the enemies around one player at a depth (round robin, one per tick); with
+    /// nobody at a depth, puts raised enemies back to their own level.
+    fn sweep(&mut self, world: &World) {
+        if self.ticks % FORGET_EVERY == 0 {
+            self.depths.forget_gone(world);
+        }
+        let deep: Vec<(u32, u32)> = self
+            .players
+            .values()
+            .filter_map(|&p| {
+                let depth = self.accounts.get(&world.player_account(p)?)?.depth(&self.settings);
+                (depth > 0).then_some((p, depth))
+            })
+            .collect();
+        if deep.is_empty() {
+            if !self.depths.raised.is_empty() {
+                let lowered = self.depths.lower_all(world);
+                log!("ascension: nobody at a Shroud Depth, {lowered} enemy(s) back to their own level");
+            }
+            return;
+        }
+        let (player, depth) = deep[self.sweep_next % deep.len()];
+        self.sweep_next = self.sweep_next.wrapping_add(1);
+        let raised = self.depths.sweep(world, player, depth, self.settings.levels_per_depth, self.settings.depth_radius);
+        if raised > 0 {
+            log!("ascension: {raised} enemy(s) around player {player} raised to depth {depth} ({} raised in all)", self.depths.raised.len());
+        }
+    }
+
     fn window(&self, world: &World, client: u64) -> ToClient {
         let mut content = Vec::new();
         let player = self.players.get(&client).copied();
@@ -152,6 +190,24 @@ impl Ascension {
                     });
                 }
                 content.push(Node::Row { children: vec![Node::Button { id: "reset".into(), label: "Take all points back".into() }] });
+                content.push(Node::Separator);
+                let unlocked = a.unlocked_depth(&self.settings);
+                if unlocked == 0 {
+                    content.push(Node::Text { text: "Shroud Depths unlock with Ascension 1: enemies around you get stronger, your Ascension XP grows faster.".into() });
+                } else {
+                    let depth = a.depth(&self.settings);
+                    content.push(Node::Heading { text: format!("Shroud Depth {depth} of {unlocked}") });
+                    content.push(Node::Text {
+                        text: if depth == 0 {
+                            "Enemies as the game made them.".into()
+                        } else {
+                            format!("Enemies around you: +{} levels. Ascension XP: +{:.0} %.", depth * self.settings.levels_per_depth, self.settings.depth_xp_bonus * depth as f64 * 100.0)
+                        },
+                    });
+                    content.push(Node::Row {
+                        children: vec![Node::Button { id: "depth:-".into(), label: "Shallower".into() }, Node::Button { id: "depth:+".into(), label: "Deeper".into() }],
+                    });
+                }
             }
         }
         ToClient::Open { owner: ID.into(), window: Window { id: "main".into(), title: "Ascension".into(), content } }
@@ -192,8 +248,8 @@ impl Mod for Ascension {
             }
             return;
         };
-        let gain = (amount as f64 * self.settings.xp_multiplier).round() as u64;
         let a = self.accounts.entry(account).or_default();
+        let gain = a.ascension_xp(amount, &self.settings);
         let gained = a.add_xp(gain);
         self.dirty = true;
         if gained > 0 {
@@ -242,6 +298,14 @@ impl Mod for Ascension {
                     self.open.push(client);
                 }
             }
+            ("depth:-" | "depth:+", Event::Click { .. }, Some(account)) => {
+                let a = self.accounts.entry(account).or_default();
+                let now = a.depth(&self.settings);
+                let want = if node == "depth:+" { now + 1 } else { now.saturating_sub(1) };
+                let chosen = a.choose_depth(want, &self.settings);
+                log!("ascension: player {:?} chose Shroud Depth {chosen}", player);
+                self.dirty = true;
+            }
             ("reset", Event::Click { .. }, Some(account)) => {
                 self.accounts.entry(account).or_default().reset();
                 self.dirty = true;
@@ -277,6 +341,7 @@ impl Mod for Ascension {
                 wrote |= self.sync(&world, player, account);
             }
         }
+        self.sweep(&world);
         if wrote {
             self.save();
             self.refresh(host);

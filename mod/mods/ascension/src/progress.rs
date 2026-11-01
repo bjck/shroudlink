@@ -21,11 +21,19 @@ pub struct Settings {
     pub points_per_level: u32,
     /// points one attribute can take (the client shows primary attributes as one byte)
     pub max_points_per_attribute: u32,
+    /// deepest Shroud Depth (until Breaches unlock depths, Ascension level N unlocks depth N)
+    pub max_depth: u32,
+    /// enemy levels added per depth
+    pub levels_per_depth: u32,
+    /// extra Ascension XP per depth (0.1: +10 %)
+    pub depth_xp_bonus: f64,
+    /// metres around a player in which enemies are raised
+    pub depth_radius: f64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { xp_multiplier: 1.0, points_per_level: 1, max_points_per_attribute: 100 }
+        Settings { xp_multiplier: 1.0, points_per_level: 1, max_points_per_attribute: 100, max_depth: 20, levels_per_depth: 3, depth_xp_bonus: 0.1, depth_radius: 80.0 }
     }
 }
 
@@ -36,11 +44,23 @@ impl Settings {
             xp_multiplier: v["xp_multiplier"].as_f64().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(d.xp_multiplier),
             points_per_level: v["points_per_level"].as_u64().map_or(d.points_per_level, |p| p.min(100) as u32),
             max_points_per_attribute: v["max_points_per_attribute"].as_u64().map_or(d.max_points_per_attribute, |p| p.min(200) as u32),
+            max_depth: v["max_depth"].as_u64().map_or(d.max_depth, |p| p.min(100) as u32),
+            levels_per_depth: v["levels_per_depth"].as_u64().map_or(d.levels_per_depth, |p| p.min(50) as u32),
+            depth_xp_bonus: v["depth_xp_bonus"].as_f64().filter(|b| b.is_finite() && *b >= 0.0).unwrap_or(d.depth_xp_bonus),
+            depth_radius: v["depth_radius"].as_f64().filter(|r| r.is_finite() && *r > 0.0).map_or(d.depth_radius, |r| r.min(300.0)),
         }
     }
 
     pub fn to_json(&self) -> Value {
-        json!({ "xp_multiplier": self.xp_multiplier, "points_per_level": self.points_per_level, "max_points_per_attribute": self.max_points_per_attribute })
+        json!({
+            "xp_multiplier": self.xp_multiplier,
+            "points_per_level": self.points_per_level,
+            "max_points_per_attribute": self.max_points_per_attribute,
+            "max_depth": self.max_depth,
+            "levels_per_depth": self.levels_per_depth,
+            "depth_xp_bonus": self.depth_xp_bonus,
+            "depth_radius": self.depth_radius,
+        })
     }
 }
 
@@ -69,6 +89,8 @@ pub struct Account {
     pub xp: u64,
     /// points on each of [`STATS`]
     pub points: [u32; 6],
+    /// the Shroud Depth the player chose (0: vanilla)
+    pub depth: u32,
 }
 
 impl Account {
@@ -77,12 +99,12 @@ impl Account {
         for (i, (key, _)) in STATS.iter().enumerate() {
             points[i] = v["points"][key].as_u64().unwrap_or(0) as u32;
         }
-        Account { level: v["level"].as_u64().unwrap_or(0) as u32, xp: v["xp"].as_u64().unwrap_or(0), points }
+        Account { level: v["level"].as_u64().unwrap_or(0) as u32, xp: v["xp"].as_u64().unwrap_or(0), points, depth: v["depth"].as_u64().unwrap_or(0) as u32 }
     }
 
     pub fn to_json(&self) -> Value {
         let points: serde_json::Map<String, Value> = STATS.iter().zip(self.points).map(|((k, _), p)| (k.to_string(), json!(p))).collect();
-        json!({ "level": self.level, "xp": self.xp, "points": points })
+        json!({ "level": self.level, "xp": self.xp, "points": points, "depth": self.depth })
     }
 
     /// Adds Ascension XP; returns how many levels were gained.
@@ -112,6 +134,27 @@ impl Account {
         }
         self.points[i] += 1;
         true
+    }
+
+    /// The deepest depth this account may choose.
+    pub fn unlocked_depth(&self, settings: &Settings) -> u32 {
+        self.level.min(settings.max_depth)
+    }
+
+    /// The chosen depth, never above what is unlocked (settings may have changed).
+    pub fn depth(&self, settings: &Settings) -> u32 {
+        self.depth.min(self.unlocked_depth(settings))
+    }
+
+    /// Chooses a depth (clamped to the unlocked ones); returns the depth now chosen.
+    pub fn choose_depth(&mut self, depth: u32, settings: &Settings) -> u32 {
+        self.depth = depth.min(self.unlocked_depth(settings));
+        self.depth
+    }
+
+    /// Ascension XP for `xp` game XP at the chosen depth.
+    pub fn ascension_xp(&self, xp: u32, settings: &Settings) -> u64 {
+        (xp as f64 * settings.xp_multiplier * (1.0 + settings.depth_xp_bonus * self.depth(settings) as f64)).round() as u64
     }
 
     /// Takes every point back (free).
@@ -155,10 +198,22 @@ mod tests {
     }
 
     #[test]
+    fn depths_follow_ascension() {
+        let s = Settings::default();
+        let mut a = Account { level: 3, ..Account::default() };
+        assert_eq!(a.choose_depth(10, &s), 3);
+        assert_eq!(a.ascension_xp(100, &s), 130);
+        a.level = 1;
+        assert_eq!(a.depth(&s), 1, "a lower unlock caps the chosen depth");
+        assert_eq!(a.choose_depth(0, &s), 0);
+        assert_eq!(a.ascension_xp(100, &s), 100);
+    }
+
+    #[test]
     fn json_round_trip() {
-        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1] };
+        let a = Account { level: 4, xp: 77, points: [1, 0, 0, 2, 0, 1], depth: 2 };
         assert_eq!(Account::from_json(&a.to_json()), a);
-        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, max_points_per_attribute: 50 };
+        let s = Settings { xp_multiplier: 2.0, points_per_level: 2, max_points_per_attribute: 50, max_depth: 5, levels_per_depth: 4, depth_xp_bonus: 0.2, depth_radius: 60.0 };
         assert_eq!(Settings::from_json(&s.to_json()), s);
         assert_eq!(Settings::from_json(&json!({})), Settings::default());
     }
