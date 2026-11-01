@@ -129,8 +129,6 @@ static FOCUS: AtomicU64 = AtomicU64::new(0);
 const TEXT_INPUT_WIDTH: f32 = 520.0;
 const TEXT_INPUT_MAX: usize = 64;
 /// Background of text fields: blue panel with a fine edge.
-/// Game tab index when the page was opened; choosing another game tab closes the page.
-static PAGE_GAME_TAB: AtomicU64 = AtomicU64::new(u64::MAX);
 /// Index into the mod menu of the entry shown on the page.
 static PAGE_SELECTED: AtomicU64 = AtomicU64::new(0);
 
@@ -203,21 +201,27 @@ pub fn draw_mods_tab(api: &Api) {
         let clicked = api.text_button(label, STYLE_TOP_TAB, shroudlink::string_id(b"shroudlinkModsTab"));
         api.close_frame(&mut tab);
         if clicked {
-            set_page_open(api, !mods_page_open());
+            set_page_open(!mods_page_open());
         }
     }
 }
 
 /// Opens or closes the MODS page in the player menu (as a click on its tab does).
-fn set_page_open(api: &Api, open: bool) {
+fn set_page_open(open: bool) {
     PAGE_OPEN.store(open, Ordering::Relaxed);
     save_page();
-    PAGE_GAME_TAB.store(unsafe { api.player_tab() }.unwrap_or(u64::MAX), Ordering::Relaxed);
     if open {
         if let Some((owner, entry)) = UI.lock().unwrap().menu.get(PAGE_SELECTED.load(Ordering::Relaxed) as usize).cloned() {
             crate::link::send(UiEvent { window: String::new(), node: entry.id, event: Event::Menu }.to_message(&owner));
         }
     }
+}
+
+/// A game tab was clicked while the MODS page was open: the
+/// player menu shows that tab's page again.
+pub fn game_tab_chosen() {
+    PAGE_OPEN.store(false, Ordering::Relaxed);
+    save_page();
 }
 
 /// The MODS key was pressed while playing: the player menu is opening, the MODS page
@@ -350,7 +354,7 @@ pub fn draw(api: &Api) {
             log!("ui: mods key on screen {screen:#04x}, menu {menu_visible}");
             if menu_visible {
                 drop(ui);
-                set_page_open(api, !mods_page_open());
+                set_page_open(!mods_page_open());
                 ui = UI.lock().unwrap();
             } else if screen == SCREEN_GAMEPLAY {
                 crate::input::press_menu_key();
@@ -361,11 +365,11 @@ pub fn draw(api: &Api) {
         if waiting.is_some() && menu_visible {
             *OPEN_WITH_MENU.lock().unwrap() = None;
             drop(ui);
-            set_page_open(api, true);
+            set_page_open(true);
             ui = UI.lock().unwrap();
         }
-        if mods_page_open() && (!menu_visible || unsafe { api.player_tab() } != Some(PAGE_GAME_TAB.load(Ordering::Relaxed))) {
-            // player menu closed or another game tab chosen
+        if mods_page_open() && !menu_visible {
+            // player menu closed (a game tab chosen closes the page in the player menu hook)
             PAGE_OPEN.store(false, Ordering::Relaxed);
             save_page();
         }

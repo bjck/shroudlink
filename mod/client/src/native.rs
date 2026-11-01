@@ -49,7 +49,9 @@ const DIMMED_TINT: u64 = 0x3f80_0000_4c50_5050;
 const LOCK_RIM: f32 = 3.0;
 const LOCK_RIM_STYLE: u32 = 10;
 const SIG_ITEM_SLOT: &str = "48 8B C4 4C 89 40 18 48 89 48 08 55 53 56 57 41 55";
-/// `FUN_7ff623320400(menuId, &list)`: fills the tab entries of a menu (player menu: id 3).
+/// `FUN_7ff623320400(menuId, &list)`: fills the tab entries of a menu and returns the
+/// address of its selected-tab field, which the tab row writes on a click. In a running
+/// game that is the player menu's page field (`PLAYER_PAGE_OFFSET`), whatever the id.
 /// `FUN_7ff6231e7700(menu, mode)`: the player menu (tab row, header, current page).
 const SIG_PLAYER_MENU: &str = "89 54 24 10 88 4C 24 08 55 53 56 57";
 /// Page index the player menu dispatches on (game state + 0x31e70; 0 social .. 6 skills).
@@ -466,11 +468,6 @@ impl Api {
         (!holder.is_null() && *holder != 0).then_some(holder as usize)
     }
 
-    /// Index of the active player menu tab (holder + 0x32a90), if a game is running.
-    pub unsafe fn player_tab(&self) -> Option<u64> {
-        self.holder().map(|h| *((h + 0x32a90) as *const u64))
-    }
-
     /// The active game screen (byte at `gameState + 0x1cd8`); 0 when none.
     pub unsafe fn screen(&self) -> u8 {
         let ui = *(self.game_ui as *const usize);
@@ -489,6 +486,11 @@ impl Api {
 
 /// Key (entry +0x28) of the last player menu tab, after which the MODS tab is drawn.
 static LAST_PLAYER_TAB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Keys of the player menu tabs in row order; a tab's position is its page index.
+static PLAYER_TAB_KEYS: [std::sync::atomic::AtomicU64; PLAYER_MENU_TABS] = [const { std::sync::atomic::AtomicU64::new(0) }; PLAYER_MENU_TABS];
+/// The game tab clicked while the MODS page was open (`NO_PAGE`: none); the player menu
+/// hook shows it instead of the page it hid.
+static CHOSEN_PAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(NO_PAGE);
 
 unsafe extern "system" fn tab_list_hook(menu: u8, list: *mut TabList) -> *mut c_void {
     let api = API.get().unwrap();
@@ -497,6 +499,9 @@ unsafe extern "system" fn tab_list_hook(menu: u8, list: *mut TabList) -> *mut c_
     if !list.is_null() && (*list).len == PLAYER_MENU_TABS {
         let last = (*list).data.add(((*list).len - 1) * TAB_ENTRY_SIZE);
         LAST_PLAYER_TAB.store(*(last.add(0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
+        for (i, k) in PLAYER_TAB_KEYS.iter().enumerate() {
+            k.store(*((*list).data.add(i * TAB_ENTRY_SIZE + 0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
+        }
     }
     r
 }
@@ -510,9 +515,19 @@ unsafe extern "system" fn tab_widget_hook(entry: *mut u8, rect: *mut f32) -> u64
         // right after the last game tab: the MODS tab, in the same tab row
         crate::ui::draw_mods_tab(api);
     }
-    // while the MODS page is open no game tab is shown as active
-    if active & 0xff != 0 && crate::ui::mods_page_open() {
+    if crate::ui::mods_page_open() {
+        // while the MODS page is open no game tab is shown as active
         active &= !0xff;
+        // the game's own click on a tab only selects the page the MODS page hides (the
+        // player menu hook restores it), so a click on a game tab is detected here; the
+        // call has filled `rect` with the tab's layout rectangle (x, y, w, h, UI units)
+        let page = PLAYER_TAB_KEYS.iter().position(|k| k.load(std::sync::atomic::Ordering::Relaxed) == key);
+        if let Some(page) = page {
+            if mouse_click_in(*(rect as *const [f32; 4])) {
+                CHOSEN_PAGE.store(page as u64, std::sync::atomic::Ordering::Relaxed);
+                crate::ui::game_tab_chosen();
+            }
+        }
     }
     active
 }
@@ -526,7 +541,10 @@ unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
             let saved = *page;
             *page = NO_PAGE;
             let r = api.player_menu.call(menu, mode);
-            *page = saved;
+            // the tab row writes this field every frame (the hidden page comes back as the
+            // last tab), so it is always restored: to the game tab clicked meanwhile, if any
+            let chosen = CHOSEN_PAGE.swap(NO_PAGE, std::sync::atomic::Ordering::Relaxed);
+            *page = if chosen < NO_PAGE { chosen } else { saved };
             r
         }
         _ => api.player_menu.call(menu, mode),
