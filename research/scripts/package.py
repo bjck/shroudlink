@@ -3,9 +3,15 @@
     cd mod && cargo build --release && cd ..
     python research/scripts/package.py [--out dist/build]
 
-Writes chestsort-enshrouded.zip (server owner), shroudlink-client.zip (players) and
-SHA256SUMS.txt. The server package ships the mods in SERVER_MODS; the others in the
-workspace (lantern, travel, hello_mod) are built but not released.
+Writes, with SHA256SUMS.txt:
+  shroudlink-core.zip                  the framework core (server), core/steam_api64.dll
+  shroudlink-client.zip                the player addon
+  shroudlink-mod-<name>.zip            one per mod in SERVER_MODS, shroudlink_mods/<name>.dll
+  shroudlink-bigger-stacks-chests.zip  the EML data patches with UPDATE-SERVER / REPATCH
+  chestsort-enshrouded.zip             everything for a server in one zip
+The split zips unpack into one folder side by side (UPDATE-SERVER finds the core in core/
+or repatch/). Their READMEs are in dist/packages/. The other mods in the workspace
+(lantern, travel, hello_mod) are built but not released.
 """
 import argparse
 import hashlib
@@ -61,6 +67,40 @@ def client_files(target):
     ]
 
 
+PACKAGES = DIST / "packages"
+
+
+def core_files(target):
+    # a subfolder, so unpacking into the server folder cannot replace Steam's DLL by accident
+    return [
+        (target / "shroudlink_server.dll", "core/steam_api64.dll"),
+        (PACKAGES / "core" / "README.txt", "README-shroudlink-core.txt"),
+    ]
+
+
+def mod_files(target, name):
+    # no chestsort_categories.json: the mods create it, and an update must keep the owner's
+    return [
+        (target / f"{name}.dll", f"shroudlink_mods/{name}.dll"),
+        (PACKAGES / name / "README.txt", f"README-{name}.txt"),
+    ]
+
+
+def stacks_files():
+    pkg = DIST / "chestsort-enshrouded"
+    files = [
+        (pkg / "repatch" / "REPATCH.bat", "repatch/REPATCH.bat"),
+        (pkg / "repatch" / "repatch.ps1", "repatch/repatch.ps1"),
+    ]
+    files += tree(MOD / "eml", "repatch/mods")
+    files += [
+        (pkg / "UPDATE-SERVER.bat", "UPDATE-SERVER.bat"),
+        (pkg / "UPDATE-SERVER.ps1", "UPDATE-SERVER.ps1"),
+        (PACKAGES / "bigger-stacks-chests" / "README.txt", "README-bigger-stacks-chests.txt"),
+    ]
+    return files
+
+
 def write_zip(path, files):
     missing = [str(f) for f, _ in files if not f.is_file()]
     if missing:
@@ -83,9 +123,17 @@ def main():
         sys.exit(f"tag {a.tag} does not match the workspace version {v} (mod/Cargo.toml)")
 
     a.out.mkdir(parents=True, exist_ok=True)
-    zips = [a.out / "chestsort-enshrouded.zip", a.out / "shroudlink-client.zip"]
-    write_zip(zips[0], server_files(a.target))
-    write_zip(zips[1], client_files(a.target))
+    contents = {
+        "chestsort-enshrouded.zip": server_files(a.target),
+        "shroudlink-client.zip": client_files(a.target),
+        "shroudlink-core.zip": core_files(a.target),
+        "shroudlink-bigger-stacks-chests.zip": stacks_files(),
+    }
+    contents.update({f"shroudlink-mod-{m}.zip": mod_files(a.target, m) for m in SERVER_MODS})
+    zips = []
+    for name, files in contents.items():
+        zips.append(a.out / name)
+        write_zip(zips[-1], files)
 
     sums = "".join(f"{hashlib.sha256(z.read_bytes()).hexdigest()}  {z.name}\n" for z in zips)
     (a.out / "SHA256SUMS.txt").write_text(sums, encoding="ascii", newline="\n")

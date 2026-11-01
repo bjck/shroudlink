@@ -78,4 +78,4 @@ jobs:
             gh release create "$TAG" --draft --verify-tag --title "$TAG" \
               --notes "Built by GitHub Actions from $GITHUB_SHA. Verify a download with: gh attestation verify <zip> -R $GH_REPO"
           fi
-          gh release upload "$TAG" out/chestsort-enshrouded.zip out/shroudlink-client.zip out/SHA256SUMS.txt --clobber
+          gh release upload "$TAG" out/*.zip out/SHA256SUMS.txt --clobber

@@ -85,9 +85,19 @@ search. Click an item to take it from all chests at once.
 The wiki pages live in [`docs/wiki/`](docs/wiki/Home.md): for players, server owners and mod developers.
 
 ## Downloads
-See the [releases](https://github.com/bjck/shroudlink/releases): `shroudlink-client.zip` (players)
-and `chestsort-enshrouded.zip` (server owner: framework core, built-in mods, update script,
-data patches). The same files are on [Nexus Mods](https://www.nexusmods.com/enshrouded/mods/278).
+Every [release](https://github.com/bjck/shroudlink/releases) has the framework and each mod as
+its own zip, so a server takes only what it wants:
+
+| Zip | For |
+|---|---|
+| `shroudlink-core.zip` | the server: the framework (`core\steam_api64.dll`) |
+| `shroudlink-client.zip` | players: the optional addon (`dinput8.dll`) |
+| `shroudlink-mod-<name>.zip` | the server: one mod each (chestsort, assistants, storage, meter, gemforge) |
+| `shroudlink-bigger-stacks-chests.zip` | the server, optional: stacks x10 and chests x2 with the safe update script. **Read its warning.** |
+| `chestsort-enshrouded.zip` | everything for a server in one zip |
+
+The split zips unpack into one folder side by side. The framework and the mods are also on
+[Nexus Mods](https://www.nexusmods.com/enshrouded/mods/278).
 
 ## Layout
 | Path | Content |

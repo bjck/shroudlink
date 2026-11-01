@@ -29,6 +29,7 @@ __pycache__/
 /dist/chestsort-enshrouded/repatch/*.dll
 /dist/chestsort-enshrouded/repatch/server/
 /dist/chestsort-enshrouded/repatch/steamcmd/
+!/dist/packages/
 !/dist/shroudlink-client/
 /dist/shroudlink-client/*.dll
 !/dist/shroudlink-client-next/

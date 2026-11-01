@@ -20,9 +20,13 @@ All paths are relative to the folder that contains `enshrouded_server.exe`.
 1. **Stop the server** and **back up the `savegame` folder**.
 2. Rename the server's `steam_api64.dll` (Steam's original, about 300 KB) to
    `steam_api64_o.dll`. Skip this if `steam_api64_o.dll` already exists.
-3. Upload the core from the server package as `steam_api64.dll` (about 1 MB).
-4. Upload the folder `shroudlink_mods/` from the server package, with all the mods in it,
-   and, on a first install, `chestsort_categories.json` (an update keeps your own).
+3. Upload the core as `steam_api64.dll` (about 1 MB): `core\steam_api64.dll` from
+   `shroudlink-core.zip`, or `repatch\steam_api64.dll` from the full package
+   `chestsort-enshrouded.zip`.
+4. Upload the mods you want into the folder `shroudlink_mods/`: each
+   `shroudlink-mod-<name>.zip` holds one, the full package all of them. On a first install
+   the full package's `chestsort_categories.json` can go along; the mods create it with the
+   defaults otherwise, and an update keeps your own.
 5. Optional: upload the data mod files for **exactly your server's build**. See
    [[Game updates|Server-Game-Updates]] for how to build them.
 6. Start the server and check `shroudlink.log`. It should contain:
