@@ -33,11 +33,11 @@ Players without the addon join and play normally.
 
 | Mod | What it does | Needs the addon |
 |---|---|---|
-| **chestsort** | Chests sort by name: rename a chest to categories (`Food`, `Ores & Gems`, `Weapons, Armor`) and quick stack fills it. Equipped items are never deposited. | no |
-| **assistants** | Survivors run your base's stations on order, take ingredients from the chests and put results back. The Farmer harvests and replants, the Fisher fishes. | yes |
-| **storage** | All chests within 40 m as one grid; click an item to take it from every chest. | yes |
-| **meter** | Damage meter: last fight, this session, what killed you. | yes |
-| **gemforge** | At the base's Gemforge, the material it needs comes from the chests within 40 m. | no |
+| **[chestsort](https://www.nexusmods.com/enshrouded/mods/279)** | Chests sort by name: rename a chest to categories (`Food`, `Ores & Gems`, `Weapons, Armor`) and quick stack fills it. Equipped items are never deposited. | no |
+| **[assistants](https://www.nexusmods.com/enshrouded/mods/280)** | Survivors run your base's stations on order, take ingredients from the chests and put results back. The Farmer harvests and replants, the Fisher fishes. | yes |
+| **[storage](https://www.nexusmods.com/enshrouded/mods/281)** | All chests within 40 m as one grid; click an item to take it from every chest. | yes |
+| **[meter](https://www.nexusmods.com/enshrouded/mods/282)** | Damage meter: last fight, this session, what killed you. | yes |
+| **[gemforge](https://www.nexusmods.com/enshrouded/mods/283)** | At the base's Gemforge, the material it needs comes from the chests within 40 m. | no |
 | addon | Item search in chests (`/`), slot locks (`L`) that deposits never touch. | yes |
 
 ## Is it safe?
@@ -93,7 +93,7 @@ its own zip, so a server takes only what it wants:
 | `shroudlink-core.zip` | the server: the framework (`core\steam_api64.dll`) |
 | `shroudlink-client.zip` | players: the optional addon (`dinput8.dll`) |
 | `shroudlink-mod-<name>.zip` | the server: one mod each (chestsort, assistants, storage, meter, gemforge) |
-| `shroudlink-bigger-stacks-chests.zip` | the server, optional: stacks x10 and chests x2 with the safe update script. **Read its warning.** |
+| `shroudlink-bigger-stacks-chests.zip` | the server, optional: stacks x10 and chests x2 with the safe update script. **Read its warning** ([Nexus](https://www.nexusmods.com/enshrouded/mods/284)). |
 | `chestsort-enshrouded.zip` | everything for a server in one zip |
 
 The split zips unpack into one folder side by side. The framework and the mods are also on
