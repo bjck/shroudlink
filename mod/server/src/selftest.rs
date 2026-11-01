@@ -284,6 +284,118 @@ fn research_production(report: &mut Report, around: u32) {
     }
 }
 
+/// HostApi v9: attributes of NPCs loaded around `around`, written through the game's own
+/// setters and recomputed by its formulas; every value is put back afterwards.
+fn attribute_tests(report: &mut Report, around: u32, player: u32) {
+    use crate::attributes::{self, Kind};
+    use shroudlink_sdk::attr;
+    if !hooks::available(Feature::Attributes) {
+        report.skip("attributes", "feature attributes is off");
+        return;
+    }
+    report.check("attribute registry", if attributes::registry_known() { Ok("passed by the game's own lookups".into()) } else { Err("not seen yet".into()) });
+    let hash = |name: &str| shroudlink_sdk::components::hash_of(name).unwrap_or(0);
+    let slots = [(attr::LEVEL, "Level", Kind::U32), (attr::STRENGTH_BASE, "Strength", Kind::S32), (attr::DAMAGEMOD_ADDER, "DamageMod", Kind::F32)];
+    let wrong: Vec<String> = slots
+        .iter()
+        .filter_map(|&(id, group, kind)| match attributes::slot(id) {
+            Some(s) if s.component == hash(group) && s.kind == kind => None,
+            other => Some(format!("{id:#010x}: {other:?}")),
+        })
+        .collect();
+    report.check("attribute slots", if wrong.is_empty() { Ok("Level u32, Strength_Base s32, DamageMod_Adder f32, each in its group's component".into()) } else { Err(wrong.join("; ")) });
+    let with = |group: &str| crate::world::entities_near(around, 1e7, hash(group)).into_iter().find(|&e| !crate::world::players().contains(&e));
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
+
+    // u32: Level = clamp(Level, 0, Level_Max), so a level above the maximum comes back clamped
+    match with("Level") {
+        None => report.skip("attribute u32", "no NPC with a Level loaded"),
+        Some(npc) => {
+            let (level, max) = (attributes::get(npc, attr::LEVEL), attributes::get(npc, attr::LEVEL_MAX));
+            let result = match (level, max) {
+                (Some(level), Some(max)) => {
+                    let set = attributes::set(npc, attr::LEVEL, max + 5.0);
+                    let clamped = attributes::get(npc, attr::LEVEL);
+                    let _ = attributes::set(npc, attr::LEVEL, level);
+                    let back = attributes::get(npc, attr::LEVEL);
+                    match (set, clamped, back) {
+                        (Ok(()), Some(c), Some(b)) if c == max && b == level => Ok(format!("npc {npc}: level {level}, set {} -> {c} (the game's clamp to Level_Max), restored", max + 5.0)),
+                        other => Err(format!("npc {npc}: level {level} max {max}: {other:?}")),
+                    }
+                }
+                other => Err(format!("npc {npc}: level/max {other:?}")),
+            };
+            report.check("attribute u32", result);
+        }
+    }
+    // s32: Health_Max = Health_Max_Base + Health_Max_Adder
+    match with("Health") {
+        None => report.skip("attribute s32", "no NPC with Health loaded"),
+        Some(npc) => {
+            let read = |id| attributes::get(npc, id);
+            let result = match (read(attr::HEALTH_MAX_BASE), read(attr::HEALTH_MAX_ADDER), read(attr::HEALTH_MAX), read(attr::HEALTH)) {
+                (Some(base), Some(adder), Some(max), Some(health)) => {
+                    let set = attributes::set(npc, attr::HEALTH_MAX_ADDER, adder + 100.0);
+                    let raised = read(attr::HEALTH_MAX);
+                    let _ = attributes::set(npc, attr::HEALTH_MAX_ADDER, adder);
+                    let back = read(attr::HEALTH_MAX);
+                    match (set, raised, back) {
+                        (Ok(()), Some(r), Some(b)) if r == base + adder + 100.0 && b == base + adder => Ok(format!("npc {npc}: health {health}/{max}, adder +100 -> max {r}, restored to {b}")),
+                        other => Err(format!("npc {npc}: base {base} adder {adder} max {max}: {other:?}")),
+                    }
+                }
+                other => Err(format!("npc {npc}: {other:?}")),
+            };
+            report.check("attribute s32", result);
+        }
+    }
+    // float: X = X_Base * X_Multiplier + X_Adder (several groups have that formula), or
+    // Movement_Mod = clamp(Movement_Mod, 0, 100); the first group a loaded NPC has
+    let groups = ["DamageMod", "CritDamageMod", "HealingMod", "ParryProficiency", "DamageModBackstab", "DamageModSkillShot", "DamageModSneak", "DamageModMerciless", "BodyHeatMaxMod"];
+    let id = |name: String| attr::id_of(&name).unwrap_or(0);
+    let float = groups.iter().find_map(|&g| with(g).map(|npc| (g, npc)));
+    match (float, with("Movement")) {
+        (Some((group, npc)), _) => {
+            let read = |slot: &str| attributes::get(npc, id(if slot.is_empty() { group.to_string() } else { format!("{group}_{slot}") }));
+            let adder_id = id(format!("{group}_Adder"));
+            let result = match (read("Base"), read("Multiplier"), read("Adder"), read("")) {
+                (Some(base), Some(mult), Some(adder), Some(total)) => {
+                    let set = attributes::set(npc, adder_id, adder + 0.5);
+                    let raised = read("");
+                    let _ = attributes::set(npc, adder_id, adder);
+                    let back = read("");
+                    match (set, raised, back) {
+                        (Ok(()), Some(r), Some(b)) if near(r, base * mult + adder + 0.5) && near(b, total) => Ok(format!("npc {npc}: {group} {total}, adder +0.5 -> {r}, restored")),
+                        other => Err(format!("npc {npc}: {group} {base} x {mult} + {adder} = {total}: {other:?}")),
+                    }
+                }
+                other => Err(format!("npc {npc}: {group} {other:?}")),
+            };
+            report.check("attribute f32", result);
+        }
+        (None, Some(npc)) => {
+            let result = match attributes::get(npc, attr::MOVEMENT_MOD) {
+                Some(before) => {
+                    let set = attributes::set(npc, attr::MOVEMENT_MOD, 150.0);
+                    let clamped = attributes::get(npc, attr::MOVEMENT_MOD);
+                    let _ = attributes::set(npc, attr::MOVEMENT_MOD, before);
+                    let back = attributes::get(npc, attr::MOVEMENT_MOD);
+                    match (set, clamped, back) {
+                        (Ok(()), Some(c), Some(b)) if near(c, 100.0) && near(b, before) => Ok(format!("npc {npc}: Movement_Mod {before}, set 150 -> {c} (the game's clamp), restored")),
+                        other => Err(format!("npc {npc}: Movement_Mod {before}: {other:?}")),
+                    }
+                }
+                None => Err(format!("npc {npc}: no Movement_Mod")),
+            };
+            report.check("attribute f32", result);
+        }
+        (None, None) => report.skip("attribute f32", "no NPC with a float attribute group loaded"),
+    }
+    // a player's Level and Experience travel with the character: never written
+    let refused = attributes::set(player, attr::LEVEL, 1.0);
+    report.check("attribute refuses player Level", match refused { Err(e) if e.contains("saved with the character") => Ok("not written".into()), other => Err(format!("{other:?}")) });
+}
+
 /// Writes a stack straight into an inventory slot (test setup only).
 unsafe fn put(game: &Game, ctx: *mut Ctx, entity: u32, index: usize, item: u32, count: u32) -> Option<u64> {
     let setup = game.inventory_setup(ctx, entity)?;
@@ -402,6 +514,7 @@ unsafe fn inventory_tests(report: &mut Report, game: &Game, ctx: *mut Ctx, playe
     let (named, unnamed) = (name_of(chest), name_of(player));
     report.check("world chest_name", if named == "Ores" && unnamed.is_empty() { Ok("the test chest is \"Ores\", the player has no name".into()) } else { Err(format!("chest {named:?}, player {unnamed:?}")) });
     research_production(report, chest);
+    attribute_tests(report, chest, player);
     // buffs need a running impact program, which needs a real player nearby
     let _ = writeln!(report.text, "INFO buffs: feature {}, getSelf ran {} time(s) so far", if crate::hooks::available(crate::hooks::Feature::Buffs) { "on" } else { "OFF" }, crate::buffs::calls());
     FAKE_PLAYER.store(0, Ordering::SeqCst);

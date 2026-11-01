@@ -10,7 +10,11 @@ event queues before dispatch; `server/src/game_events.rs`). HostApi v6: `entitie
 entities with a component type around an entity) and `move_items` (exact counts); v7 (feature `items`): `give_items`
 and `remove_items`, through the game's own inventory functions (`server/src/items.rs`); v8:
 `World::chest_name`, a chest's custom name from any callback (names the core's background
-scan already knows, so it never rescans on the game thread).
+scan already knows, so it never rescans on the game thread); v9 (feature `attributes`):
+`World::attribute` / `set_attribute` / `add_attribute`, any attribute slot of an entity
+(Level, Strength_Base, Health_Max_Adder, DamageMod_Multiplier …, ids in
+`shroudlink_sdk::attr`), written through the game's own setters so its formulas recompute
+what depends on them (`server/src/attributes.rs`).
 
 ## Goal
 

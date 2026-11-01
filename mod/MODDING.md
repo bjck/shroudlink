@@ -67,7 +67,8 @@ A mod can:
 - work with the **world** from any callback (`host.world()`): players, positions,
   teleport, any component, nearby inventories and entities with a component
   (`entities_near`), moving stacks or exact counts (`move_items`), creating and removing plain items
-  (`give_items`, `remove_items`), chest names (`chest_name`), and vanilla **buffs**
+  (`give_items`, `remove_items`), chest names (`chest_name`), **attributes** (`attribute`,
+  `set_attribute`: Level, Strength_Base, Health_Max_Adder …, ids in `shroudlink_sdk::attr`), and vanilla **buffs**
   (`apply_buff`, through the game's impact VM: `server/src/buffs.rs`). `on_tick` runs
   about once a second. `mods/travel`, `mods/storage`, `mods/lantern` and `mods/assistants`
   use them.

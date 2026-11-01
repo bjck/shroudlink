@@ -10,6 +10,7 @@
 //!   `steam_api64_o.dll` and all Steam calls are passed through to it. Proton
 //!   replaces Steam's own client DLL, so `crashhandler64.dll` is never probed there.
 
+mod attributes;
 mod buffs;
 mod components;
 mod events;
@@ -154,6 +155,11 @@ fn init() {
     if hooks::available(hooks::Feature::Buffs) {
         if let Err(e) = buffs::install() {
             hooks::disable(hooks::Feature::Buffs, e);
+        }
+    }
+    if hooks::available(hooks::Feature::Attributes) {
+        if let Err(e) = attributes::install(&module) {
+            hooks::disable(hooks::Feature::Attributes, e);
         }
     }
     selftest::install();
