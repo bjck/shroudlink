@@ -5,7 +5,7 @@
 
 Writes chestsort-enshrouded.zip (server owner), shroudlink-client.zip (players) and
 SHA256SUMS.txt. The server package ships the mods in SERVER_MODS; the others in the
-workspace (gemforge, lantern, travel, hello_mod) are built but not released.
+workspace (lantern, travel, hello_mod) are built but not released.
 """
 import argparse
 import hashlib
@@ -18,7 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 MOD = ROOT / "mod"
 DIST = ROOT / "dist"
 
-SERVER_MODS = ["chestsort", "storage", "meter", "assistants"]
+SERVER_MODS = ["chestsort", "storage", "meter", "assistants", "gemforge"]
 
 
 def version():

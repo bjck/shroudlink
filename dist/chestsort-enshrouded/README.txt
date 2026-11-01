@@ -6,6 +6,8 @@ Server side (everyone, no addon needed):
   those categories goes into that chest.
 - Action bar and equipped items are never put into chests.
 - Chests have 2x the slots (max 128), and items that stack hold 10x as many.
+- Gemforge: standing at the base's Gemforge, you can use the material it needs
+  from the chests within 40 m. Walk away and what is left goes back into them.
 
 With the client addon (shroudlink-client.zip, version 0.6 or newer) players also get:
 - item search in chests, slot locks (L), working right after joining
@@ -17,7 +19,7 @@ Players with an older addon are told to update it.
 
 Files on the server (next to enshrouded_server.exe):
   steam_api64.dll        the shroudlink core (Steam's original renamed to steam_api64_o.dll)
-  shroudlink_mods\*.dll  the mods (chestsort, storage, meter, assistants); remove one to switch it off
+  shroudlink_mods\*.dll  the mods (chestsort, storage, meter, assistants, gemforge); remove one to switch it off
   shroudlink_assistants.json   the assistants' orders and jobs (kept across restarts)
   chestsort_categories.json   categories; edits apply within seconds
   shroudlink.log         what the core and mods did

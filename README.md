@@ -20,6 +20,7 @@ Players without the addon join and play normally.
 | **assistants** | Survivors run your base's stations on order, take ingredients from the chests and put results back. The Farmer harvests and replants, the Fisher fishes. | yes |
 | **storage** | All chests within 40 m as one grid; click an item to take it from every chest. | yes |
 | **meter** | Damage meter: last fight, this session, what killed you. | yes |
+| **gemforge** | At the base's Gemforge, the material it needs comes from the chests within 40 m. | no |
 | addon | Item search in chests (`/`), slot locks (`L`) that deposits never touch. | yes |
 
 ## Is it safe?
