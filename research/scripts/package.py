@@ -9,6 +9,10 @@ Writes, with SHA256SUMS.txt:
   shroudlink-mod-<name>.zip            one per mod in SERVER_MODS, shroudlink_mods/<name>.dll
   shroudlink-bigger-stacks-chests.zip  the EML data patches with UPDATE-SERVER / REPATCH
   chestsort-enshrouded.zip             everything for a server in one zip
+  shroudlink-singleplayer.zip          addon + core (shroudlink_core.dll) + mods, for a game
+                                       that hosts its own world
+  shroudlink-eml-stacks-chests.zip     only the two EML Lua mods, for hosts that run EML; no
+                                       scripts (Nexus quarantines zips with the update scripts)
 The split zips unpack into one folder side by side (UPDATE-SERVER finds the core in core/
 or repatch/). Their READMEs are in dist/packages/. The other mods in the workspace
 (lantern, travel, hello_mod) are built but not released.
@@ -86,6 +90,24 @@ def mod_files(target, name):
     ]
 
 
+def singleplayer_files(target):
+    # unpacks straight into the game folder: the addon loads shroudlink_core.dll from there
+    files = [
+        (target / "shroudlink_client.dll", "dinput8.dll"),
+        (target / "shroudlink_server.dll", "shroudlink_core.dll"),
+    ]
+    files += [(target / f"{m}.dll", f"shroudlink_mods/{m}.dll") for m in SERVER_MODS]
+    files.append((PACKAGES / "singleplayer" / "README.txt", "README-singleplayer.txt"))
+    return files
+
+
+def eml_files():
+    files = tree(MOD / "eml", "")
+    files = [(f, name.lstrip("/")) for f, name in files]
+    files.append((PACKAGES / "eml-stacks-chests" / "README.txt", "README-eml-stacks-chests.txt"))
+    return files
+
+
 def stacks_files():
     pkg = DIST / "chestsort-enshrouded"
     files = [
@@ -128,6 +150,8 @@ def main():
         "shroudlink-client.zip": client_files(a.target),
         "shroudlink-core.zip": core_files(a.target),
         "shroudlink-bigger-stacks-chests.zip": stacks_files(),
+        "shroudlink-singleplayer.zip": singleplayer_files(a.target),
+        "shroudlink-eml-stacks-chests.zip": eml_files(),
     }
     contents.update({f"shroudlink-mod-{m}.zip": mod_files(a.target, m) for m in SERVER_MODS})
     zips = []
