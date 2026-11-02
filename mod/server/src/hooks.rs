@@ -55,8 +55,9 @@ pub struct HookPoint {
 }
 
 pub const POINTS: &[HookPoint] = &[
-    // FUN_140909660(out, strings, oldId, &text): stores a rename sent by a client
-    HookPoint { name: "set_string", feature: Feature::Channel, signature: "48 89 5C 24 10 55 56 57 41 54 41 57" },
+    // FUN_140909660(out, strings, oldId, &text): stores a rename sent by a client (the
+    // client exe has a second function with the first 12 bytes, hence the longer pattern)
+    HookPoint { name: "set_string", feature: Feature::Channel, signature: "48 89 5C 24 10 55 56 57 41 54 41 57 48 83 EC 30" },
     // FUN_1409234b0(strings, &id, &text, &size, slot, gen): next string to send to a slot
     HookPoint { name: "next_pending", feature: Feature::Channel, signature: "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 20 8B 7C 24 70" },
     // FUN_140942620(strings, id, &text, slot, size): a string was sent

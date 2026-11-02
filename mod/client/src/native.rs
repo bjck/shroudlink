@@ -54,8 +54,9 @@ const SIG_ITEM_SLOT: &str = "48 8B C4 4C 89 40 18 48 89 48 08 55 53 56 57 41 55"
 /// game that is the player menu's page field (`PLAYER_PAGE_OFFSET`), whatever the id.
 /// `FUN_7ff6231e7700(menu, mode)`: the player menu (tab row, header, current page).
 const SIG_PLAYER_MENU: &str = "89 54 24 10 88 4C 24 08 55 53 56 57";
-/// Page index the player menu dispatches on (game state + 0x31e70; 0 social .. 6 skills).
-const PLAYER_PAGE_OFFSET: usize = 0x31e70;
+/// Page index the player menu dispatches on (game state + 0x31e88 since build 26320373,
+/// 0x31e70 before; 0 social .. 6 skills).
+const PLAYER_PAGE_OFFSET: usize = 0x31e88;
 /// A page index without a page: the player menu then draws only its frame.
 const NO_PAGE: u64 = 7;
 const SIG_TAB_LIST: &str = "48 8B C4 48 89 58 08 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1";
@@ -86,12 +87,13 @@ const SIG_TIP_INIT: &str = "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 8
 const SIG_TIP_DRAW: &str = "4C 8B DC 49 89 5B 10 57 48 81 EC 00 01 00 00";
 const SIG_QR_POPUP: &str = "4C 8B DC 55 57 49 8D AB 38 F8 FF FF";
 
-/// Text style used by `doSimpleTextTabs` (theme + 0x11b94).
-pub const STYLE_TAB_TEXT: usize = 0x11b94;
-/// Label style of the player menu tabs (theme + 0x11b3c).
-pub const STYLE_TOP_TAB: usize = 0x11b3c;
-/// Title style of the QR popup (theme + 0x10a0c).
-pub const STYLE_TITLE: usize = 0x10a0c;
+/// Text style used by `doSimpleTextTabs`. The text styles moved by 0x1b0 in build 26320373
+/// (0x11b94 before); a stale offset hands the game a float where a font name is: crash.
+pub const STYLE_TAB_TEXT: usize = 0x11d44;
+/// Label style of the player menu tabs (0x11b3c before build 26320373).
+pub const STYLE_TOP_TAB: usize = 0x11cec;
+/// Title style of the QR popup (0x10a0c before build 26320373).
+pub const STYLE_TITLE: usize = 0x10bbc;
 /// Layer kinds (z-order): the HUD passes 5, the chest screen 6, popups above menus 0x1d.
 pub const LAYER_HUD: u32 = 5;
 pub const LAYER_POPUP: u32 = 0x1d;
