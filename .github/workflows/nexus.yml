@@ -1,0 +1,140 @@
+# Publishes release zips to Nexus Mods (Nexus-Mods/upload-action, beta; v3 API).
+#
+# On a published release, the release notes say which zips go to Nexus, in a line like
+#   <!-- nexus: client, singleplayer, chestsort -->
+# (an HTML comment, invisible on GitHub). Without that line nothing is uploaded: every
+# upload tells Nexus users to update, so only packages that really changed go there.
+# By hand (Actions > nexus > Run workflow): a tag and the packages, or "list" to print the
+# files Nexus knows for our mod pages (names and ids) without uploading anything.
+#
+# Needs the repository secret NEXUSMODS_API_KEY (the mod author's personal API key).
+# Files are found by their name on Nexus, so a package must be uploaded once by hand
+# before this can add versions to it. Zips with the update scripts never go to Nexus:
+# its virus scan quarantines them (see dist/packages/eml-stacks-chests/README.txt).
+name: nexus
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.8.0
+        required: true
+      packages:
+        description: 'Comma-separated packages (core, client, singleplayer, chestsort, assistants, storage, meter, gemforge, eml), or "list"'
+        required: true
+        default: list
+
+permissions:
+  contents: read
+
+concurrency: nexus
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - id: plan
+        env:
+          NEXUS_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          EVENT: ${{ github.event_name }}
+          BODY: ${{ github.event.release.body }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PACKAGES: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          api() { curl -fsS -H "apikey: $NEXUS_KEY" -H "User-Agent: shroudlink-release" "https://api.nexusmods.com/v3$1"; }
+          [ -n "$NEXUS_KEY" ] || { echo "::error::secret NEXUSMODS_API_KEY is not set"; exit 1; }
+
+          # package -> zip, Nexus mod page, file name on that page
+          declare -A ZIP=( [core]=shroudlink-core.zip [client]=shroudlink-client.zip
+            [singleplayer]=shroudlink-singleplayer.zip [chestsort]=shroudlink-mod-chestsort.zip
+            [assistants]=shroudlink-mod-assistants.zip [storage]=shroudlink-mod-storage.zip
+            [meter]=shroudlink-mod-meter.zip [gemforge]=shroudlink-mod-gemforge.zip
+            [eml]=shroudlink-eml-stacks-chests.zip )
+          declare -A PAGE=( [core]=278 [client]=278 [singleplayer]=278 [chestsort]=279 [assistants]=280
+            [storage]=281 [meter]=282 [gemforge]=283 [eml]=284 )
+          # empty name: the page's only active file
+          declare -A NAME=( [core]="Framework core - server"
+            [client]="Player addon - MODS tab - search and slot locks"
+            [singleplayer]="Singleplayer - addon core and mods"
+            [chestsort]="" [assistants]="" [storage]="" [meter]="" [gemforge]=""
+            [eml]="Bigger stacks and chests - EML mods" )
+
+          if [ "$EVENT" = release ]; then
+            tag="$RELEASE_TAG"
+            packages=$(printf '%s' "$BODY" | grep -oiP '<!--\s*nexus:\s*\K[^>]*?(?=\s*-->)' | head -1 || true)
+          else
+            tag="$INPUT_TAG"; packages="$INPUT_PACKAGES"
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "$(echo "$packages" | tr -d ' ')" = list ]; then
+            for page in 278 279 280 281 282 283 284; do
+              mod=$(api "/games/enshrouded/mods/$page" | jq -r .data.id)
+              echo "== nexus page $page (mod id $mod)"
+              api "/mods/$mod/files" | jq -r '.data.mod_files[] | "  \(.id)  active=\(.is_active)  \(.name)"'
+            done
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -z "$packages" ]; then
+            echo "No <!-- nexus: ... --> line in the release notes: nothing goes to Nexus."
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          items=()
+          for p in $(echo "$packages" | tr ',' ' '); do
+            [ -n "${ZIP[$p]:-}" ] || { echo "::error::unknown package '$p'"; exit 1; }
+            mod=$(api "/games/enshrouded/mods/${PAGE[$p]}" | jq -r .data.id)
+            files=$(api "/mods/$mod/files")
+            if [ -n "${NAME[$p]}" ]; then
+              file=$(echo "$files" | jq -c --arg n "${NAME[$p]}" '[.data.mod_files[] | select(.is_active and (.name | ascii_downcase) == ($n | ascii_downcase))]')
+            else
+              file=$(echo "$files" | jq -c '[.data.mod_files[] | select(.is_active)]')
+            fi
+            if [ "$(echo "$file" | jq length)" != 1 ]; then
+              echo "::error::package $p: no single matching file on Nexus page ${PAGE[$p]}; its files:"
+              echo "$files" | jq -r '.data.mod_files[] | "  \(.id)  active=\(.is_active)  \(.name)"'
+              exit 1
+            fi
+            items+=("$(echo "$file" | jq -c --arg p "$p" --arg zip "${ZIP[$p]}" --arg mod "$mod" \
+              '.[0] | {package: $p, zip: $zip, mod_id: $mod, file_id: .id, name: .name}')")
+            echo "$p: ${ZIP[$p]} -> page ${PAGE[$p]}, file '$(echo "$file" | jq -r '.[0].name')'"
+          done
+          echo "matrix=$(printf '%s\n' "${items[@]}" | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  upload:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Download ${{ matrix.zip }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          ZIP: ${{ matrix.zip }}
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$ZIP"
+      - name: Upload to Nexus (${{ matrix.name }})
+        # v1.0.0-beta.11, pinned to its commit: this step receives the API key
+        uses: Nexus-Mods/upload-action@98532f7670c27cbecc78fae03fa3e278147827e2
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ matrix.file_id }}
+          filename: ${{ matrix.zip }}
+          display_name: ${{ matrix.name }}
+          version: ${{ needs.plan.outputs.version }}
+          archive_existing_version: true
+          update_mod_version: true
+          mod_id: ${{ matrix.mod_id }}
+          changelog: "Version ${{ needs.plan.outputs.version }}: https://github.com/${{ github.repository }}/releases/tag/${{ needs.plan.outputs.tag }}"
