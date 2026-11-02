@@ -60,12 +60,12 @@ jobs:
             [eml]=shroudlink-eml-stacks-chests.zip )
           declare -A PAGE=( [core]=278 [client]=278 [singleplayer]=278 [chestsort]=279 [assistants]=280
             [storage]=281 [meter]=282 [gemforge]=283 [eml]=284 )
-          # empty name: the page's only active file
+          # a file keeps the name of its first version on Nexus (later display names do not
+          # rename it); empty name: the page's only active file
           declare -A NAME=( [core]="Framework core - server"
             [client]="Player addon - MODS tab - search and slot locks"
             [singleplayer]="Singleplayer - addon core and mods"
-            [chestsort]="" [assistants]="" [storage]="" [meter]="" [gemforge]=""
-            [eml]="Bigger stacks and chests - EML mods" )
+            [chestsort]="" [assistants]="" [storage]="" [meter]="" [gemforge]="" [eml]="" )
 
           if [ "$EVENT" = release ]; then
             tag="$RELEASE_TAG"
