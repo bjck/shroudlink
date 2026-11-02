@@ -9,6 +9,11 @@
 //! - `steam_api64.dll` (Wine/Proton hosts): the game's file is renamed to
 //!   `steam_api64_o.dll` and all Steam calls are passed through to it. Proton
 //!   replaces Steam's own client DLL, so `crashhandler64.dll` is never probed there.
+//!
+//! Singleplayer: as `shroudlink_core.dll` next to `enshrouded.exe`, loaded by the client
+//! addon. The client hosts the world itself and carries the same server functions, so
+//! the hooks and mods work unchanged; the addon reaches this host through the game's
+//! own loopback.
 
 mod buffs;
 mod components;
@@ -115,11 +120,16 @@ fn init() {
     chestsort_common::log::init("shroudlink.log");
     // a panic aborts the server (panic = "abort"); at least say where and why
     std::panic::set_hook(Box::new(|info| log!("PANIC: {info}")));
-    unsafe { windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(on_crash)) };
+    let in_client = host_is_client();
+    // the dedicated server has no crash handler of its own; the game client has one
+    if !in_client {
+        unsafe { windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(on_crash)) };
+    }
     log!(
-        "shroudlink server {} starting (loaded as {})",
+        "shroudlink server {} starting (loaded as {}{})",
         env!("CARGO_PKG_VERSION"),
-        own_file_name().unwrap_or_else(|| "?".into())
+        own_file_name().unwrap_or_else(|| "?".into()),
+        if in_client { ", singleplayer host in the game client" } else { "" }
     );
     match PROXY_STATUS.get() {
         Some(Ok(())) => log!("steam_api64 proxy: all calls go to {}", steam_proxy::ORIGINAL),
@@ -163,9 +173,11 @@ fn init() {
         }
     }
     if hooks::available(hooks::Feature::Channel) {
-        match link_host::install(&module) {
-            Ok(()) => plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR)),
-            Err(e) => hooks::disable(hooks::Feature::Channel, e),
+        // mods first: an addon that connects in between would be welcomed without them
+        // (in singleplayer the addon is already running when the core starts)
+        plugins::load_all(&chestsort_common::game_dir().join(plugins::DIR));
+        if let Err(e) = link_host::install(&module) {
+            hooks::disable(hooks::Feature::Channel, e);
         }
     }
     hooks::report(&module);
@@ -202,4 +214,12 @@ fn own_file_name() -> Option<String> {
         let path = String::from_utf16_lossy(&buf[..len]);
         path.rsplit(['\\', '/']).next().map(str::to_owned)
     }
+}
+
+/// True inside the game client (`enshrouded.exe`), i.e. a singleplayer or co-op host.
+fn host_is_client() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+        .is_some_and(|n| n == "enshrouded.exe")
 }

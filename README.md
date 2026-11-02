@@ -19,7 +19,8 @@
 **Server mods for Enshrouded 1.0 dedicated servers, with their own MODS tab in the game.**
 Rename a chest "Food, Wood" and hold R: everything of those kinds goes in. Tell a
 survivor "make 5 Iron Bars" and they run the furnace with what is in your chests.
-Players without the addon join and play normally.
+Players without the addon join and play normally. **No server?** The same mods run in
+singleplayer too: `shroudlink-singleplayer.zip` goes into the game folder.
 
 ![The MODS tab: the base's survivors, the Farmer's orders, jobs and crops](docs/screenshots/assistants.gif)
 
@@ -95,6 +96,7 @@ its own zip, so a server takes only what it wants:
 | `shroudlink-mod-<name>.zip` | the server: one mod each (chestsort, assistants, storage, meter, gemforge) |
 | `shroudlink-bigger-stacks-chests.zip` | the server, optional: stacks x10 and chests x2 with the safe update script. **Read its warning.** |
 | `chestsort-enshrouded.zip` | everything for a server in one zip |
+| `shroudlink-singleplayer.zip` | singleplayer: addon, core (`shroudlink_core.dll`) and the mods for the game folder |
 
 The split zips unpack into one folder side by side. The framework and the mods are also on
 [Nexus Mods](https://www.nexusmods.com/enshrouded/mods/278).
@@ -114,6 +116,8 @@ cargo build --release
 # target/release/shroudlink_server.dll -> server core, install as steam_api64.dll (original renamed to steam_api64_o.dll)
 # target/release/chestsort.dll         -> server mod, put into shroudlink_mods/ next to enshrouded_server.exe
 # target/release/shroudlink_client.dll -> client, install as dinput8.dll next to enshrouded.exe
+# singleplayer: shroudlink_server.dll as shroudlink_core.dll next to enshrouded.exe (the addon
+#   loads it) and the mods in shroudlink_mods/ there
 ```
 Tested with server build 26319703 / client 26320373. Functions are located by byte
 signatures, so most game updates need no rebuild; the EML data patches have to be

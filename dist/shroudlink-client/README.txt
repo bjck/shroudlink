@@ -16,8 +16,8 @@ WHAT YOU GET
   The lock belongs to the slot, not the item: move the item and the lock stays.
   Locks are kept per server and work right after joining.
   Your action bar and equipped items are never put into chests either.
-- MODS tab in the menu (next to SKILLS, only on our server). Press K to open it,
-  also while playing; click another tab or press Q/E to leave it. Long pages scroll with the mouse wheel; item slots show the
+- MODS tab in the menu (next to SKILLS, on our server or with shroudlink-singleplayer).
+  Press K to open it, also while playing; click another tab or press Q/E to leave it. Long pages scroll with the mouse wheel; item slots show the
   game's own tooltip; messages from the mods pop up at the top (in menus at the
   bottom; click one to make it go away).
     Assistants - your survivors work for you. Stand near them at your base, pick
