@@ -12,6 +12,9 @@ chest slots. Characters that join such a server can lose the same from their bac
   - Before every game update: stop the server and back up the "savegame" folder.
   - Update with UPDATE-SERVER.bat: it backs up the save, builds the patched files for the
     new build, keeps the world away while the server updates and uploads everything.
+  - Safety stop: UPDATE-SERVER.bat also uploads shroudlink_data.txt. If the server then
+    starts with your world on other data files, the shroudlink core stops it before the
+    world is loaded (only with the shroudlink core installed).
   - Players: before joining after an update, back up your characters
     (Steam\userdata\<your id>\1203620\remote\).
 

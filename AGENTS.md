@@ -155,6 +155,11 @@ disk. Every push and pull request is tested and built there too.
   x10 stacks**: the game deletes everything above the vanilla stack size on load. That
   happened once already. Updates go through `UPDATE-SERVER.ps1`, which parks the world
   while the server updates.
+- The core's data guard (`server/src/data_guard.rs`) ends the server from `DllMain` when a
+  world exists and `enshrouded_server.kfc` no longer matches the SHA-256 in
+  `shroudlink_data.txt` (written by `UPDATE-SERVER.ps1` / `repatch.ps1`). EML is never
+  shipped: if the owner installed its proxy (`dbghelp.dll`, `eml.rs` recognises it), EML
+  patches on every start and the guard steps aside.
 - The EML data patches (`enshrouded_server.kfc`, `.kfc_resources`) are tied to one exact
   build; patched files for build A crash build B. The mod DLL usually survives updates.
 - On the host, replace files by rename (`x.new` → `x`, keep `x.prev-*`). Never delete

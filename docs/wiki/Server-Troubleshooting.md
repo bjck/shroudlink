@@ -32,6 +32,10 @@ Steam's original is present as `steam_api64_o.dll`.
   backpack layout.
 - `shroudlink.log` should show `player N: K locked slot(s) kept` on every deposit.
 
+**The server stops right after starting, with `data guard: STOPPED THE SERVER`.**
+The data files are not the patched ones, and loading the world would delete items. Run
+`UPDATE-SERVER.bat`. See [[Game updates|Server-Game-Updates]].
+
 **The server crashes on start after an update.**
 The data files are probably for another build. Follow
 [[Game updates|Server-Game-Updates]].

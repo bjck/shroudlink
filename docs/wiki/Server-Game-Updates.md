@@ -37,6 +37,40 @@ whenever something has to be clicked in the panel:
 7. You switch auto update **off** and start the server. If the console shows "Deleted …
    items", stop it immediately; the backup is in `backups\`.
 
+## The safety stop
+
+`UPDATE-SERVER.bat` (and `REPATCH.bat`) also writes `shroudlink_data.txt` next to the
+data files: the SHA-256 of the patched `enshrouded_server.kfc`. Every time the server
+starts, the shroudlink core compares the file with it before the game reads any data. If
+a world is in the save folder and the file is not the patched one, the core **stops the
+server** and says so in the console and in `shroudlink.log`:
+
+```
+data guard: STOPPED THE SERVER. enshrouded_server.kfc is not the patched file ...
+```
+
+Then run `UPDATE-SERVER.bat` and start again. The stop is skipped when:
+
+- `shroudlink_data.txt` does not exist (a server without data patches). Delete it to run
+  without them on purpose; items above the vanilla stack size are then lost.
+- no world is in the save folder (the update start with the world parked).
+- EML's own loader is installed (see below).
+
+The core checks this when it is loaded. Installed as `steam_api64.dll` (the package's
+way) that is before the game starts. Under the other names it is loaded later, and the
+stop is not guaranteed to come in time.
+
+## EML's loader on the server (optional)
+
+shroudlink does not ship EML. If you install EML's `dbghelp.dll` yourself
+([kfc-parser releases](https://github.com/Brabb3l/kfc-parser/releases)) next to
+`enshrouded_server.exe`, with EML mods in a `mods` folder, EML patches the data files
+on every start, also after a game update. The core recognises it (`EML found` and one
+`EML mod` line per mod in `shroudlink.log`) and leaves the data to it: the safety stop
+steps aside. Make sure the mods you rely on (bigger stacks) are in that `mods` folder,
+or the update start deletes the items all the same. Do not install EML as `dinput8.dll`
+on a server where the shroudlink core uses that name.
+
 ## Check a new build first (developers)
 
 ```

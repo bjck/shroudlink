@@ -12,6 +12,8 @@
 
 mod buffs;
 mod components;
+mod data_guard;
+mod eml;
 mod events;
 mod game;
 mod game_events;
@@ -74,10 +76,14 @@ pub extern "C" fn Breakpad_SteamWriteMiniDumpUsingExceptionInfoWithBuildId() {}
 static STARTED: AtomicBool = AtomicBool::new(false);
 /// Outcome of setting up the `steam_api64.dll` proxy, logged once logging is up.
 static PROXY_STATUS: OnceLock<Result<(), String>> = OnceLock::new();
+/// EML, if installed, and the data guard's verdict, logged once logging is up.
+static DATA: OnceLock<(Option<eml::Eml>, data_guard::Verdict)> = OnceLock::new();
 
 #[no_mangle]
 pub extern "system" fn DllMain(module: HMODULE, reason: u32, _reserved: *mut c_void) -> i32 {
     if reason == DLL_PROCESS_ATTACH && !STARTED.swap(true, Ordering::SeqCst) {
+        // before the game reads its data files, so it cannot wait for `init` either
+        guard_data();
         // the game calls Steam as soon as the loader returns, so this cannot wait for `init`
         if own_file_name().is_some_and(|n| n.eq_ignore_ascii_case("steam_api64.dll")) {
             let _ = PROXY_STATUS.set(unsafe { steam_proxy::init(module) });
@@ -95,6 +101,28 @@ pub extern "system" fn DllMain(module: HMODULE, reason: u32, _reserved: *mut c_v
         std::thread::spawn(init);
     }
     TRUE
+}
+
+/// Ends the process when the world would load on data files other than the patched ones
+/// (`data_guard.rs`).
+fn guard_data() {
+    let dir = chestsort_common::game_dir();
+    let eml = eml::detect(&dir, own_file_name().as_deref());
+    let verdict = data_guard::check(&dir, eml.is_some());
+    if verdict.stops() {
+        let text = data_guard::describe(&verdict);
+        chestsort_common::log::init("shroudlink.log");
+        log!("{text}");
+        // the host's console shows the server's output
+        eprintln!("[shroudlink] {text}");
+        unsafe {
+            windows_sys::Win32::System::Threading::TerminateProcess(
+                windows_sys::Win32::System::Threading::GetCurrentProcess(),
+                1,
+            )
+        };
+    }
+    let _ = DATA.set((eml, verdict));
 }
 
 /// Only one copy may hook the game, even if both file names are installed.
@@ -125,6 +153,15 @@ fn init() {
         Some(Ok(())) => log!("steam_api64 proxy: all calls go to {}", steam_proxy::ORIGINAL),
         Some(Err(e)) => log!("steam_api64 proxy: {e}"),
         None => {}
+    }
+    if let Some((eml, verdict)) = DATA.get() {
+        if let Some(eml) = eml {
+            log!("EML found ({}), it patches the data with {} mod(s) in mods/", eml.proxy, eml.mods.len());
+            for m in &eml.mods {
+                log!("  EML mod {m}");
+            }
+        }
+        log!("{}", data_guard::describe(verdict));
     }
 
     let Some(module) = Module::main() else {

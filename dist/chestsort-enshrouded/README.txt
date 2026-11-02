@@ -23,6 +23,7 @@ Files on the server (next to enshrouded_server.exe):
   shroudlink_assistants.json   the assistants' orders and jobs (kept across restarts)
   chestsort_categories.json   categories; edits apply within seconds
   shroudlink.log         what the core and mods did
+  shroudlink_data.txt    written by UPDATE-SERVER: which data files are the patched ones
 
 WHEN A GAME UPDATE COMES OUT
 ----------------------------
@@ -33,6 +34,15 @@ above the normal size and deletes the rest (seen 2026-10-21: 12,000 wood gone).
 Run UPDATE-SERVER.bat on a Windows PC. It backs up the savegame, builds the patched
 files for the new build, parks your world while the server updates, puts it back,
 uploads everything and tells you exactly when to click what in the panel.
+
+Safety stop: if the server starts with your world but the data files are not the
+patched ones (an update came in anyway), shroudlink stops the server before the world
+is loaded and says why in the console and in shroudlink.log. Run UPDATE-SERVER.bat,
+then start again. Deleting shroudlink_data.txt switches the stop off.
+
+EML on the server (optional, not included): if you install EML's dbghelp.dll yourself,
+it patches the data files on every start with the EML mods in its "mods" folder.
+shroudlink notices it, lists those mods in shroudlink.log and leaves the patching to it.
 
 If something goes wrong: the backup is in backups\savegame_<date>. Stop the server,
 rename its "savegame" folder and upload the backup as "savegame".

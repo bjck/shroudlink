@@ -19,6 +19,16 @@ function Get-Emm($dir) {
     $emm
 }
 
+# The shroudlink core stops the server when a world would load on data files other than
+# these (a game update brings vanilla data back): it compares them with this marker.
+function Write-DataMarker($serverDir, $build, $path) {
+    $hash = (Get-FileHash (Join-Path $serverDir 'enshrouded_server.kfc') -Algorithm SHA256).Hash
+    $text = "# shroudlink: the patched data files. The server stops before loading the world when they no longer match.`r`n" +
+            "# Delete this file to run without the data patches (items above the vanilla stack size are then lost).`r`n" +
+            "build $build`r`nenshrouded_server.kfc $hash`r`n"
+    [IO.File]::WriteAllText($path, $text)
+}
+
 if (-not (Test-Path $steamcmd)) {
     Write-Host 'Downloading SteamCMD...'
     $zip = Join-Path $here 'steamcmd.zip'
@@ -44,6 +54,7 @@ $build = [regex]::Match($manifest, '"buildid"\s+"(\d+)"').Groups[1].Value
 $out = Join-Path (Split-Path $here) "upload-build-$build"
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item (Join-Path $server 'enshrouded_server.kfc'), (Join-Path $server 'enshrouded_server.kfc_resources') $out -Force
+Write-DataMarker $server $build (Join-Path $out 'shroudlink_data.txt')
 # empty data containers the patched file expects
 Get-ChildItem $server -Filter 'enshrouded_server_*.dat' | Where-Object Length -eq 0 | Copy-Item -Destination $out -Force
 Copy-Item (Join-Path $here 'steam_api64.dll') $out -Force

@@ -3,6 +3,7 @@
 pub mod log;
 pub mod proxy;
 pub mod scan;
+pub mod sha256;
 
 use std::path::PathBuf;
 

@@ -44,6 +44,16 @@ function Get-Emm($dir) {
     $emm
 }
 
+# The shroudlink core stops the server when a world would load on data files other than
+# these (a game update brings vanilla data back): it compares them with this marker.
+function Write-DataMarker($serverDir, $build, $path) {
+    $hash = (Get-FileHash (Join-Path $serverDir 'enshrouded_server.kfc') -Algorithm SHA256).Hash
+    $text = "# shroudlink: the patched data files. The server stops before loading the world when they no longer match.`r`n" +
+            "# Delete this file to run without the data patches (items above the vanilla stack size are then lost).`r`n" +
+            "build $build`r`nenshrouded_server.kfc $hash`r`n"
+    [IO.File]::WriteAllText($path, $text)
+}
+
 function Get-BuildId($manifestText) {
     [regex]::Match($manifestText, '"buildid"\s+"(\d+)"').Groups[1].Value
 }
@@ -156,6 +166,10 @@ try {
     Step '6. Uploading patched files and the mod'
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc') 'enshrouded_server.kfc' "vanilla-$build"
     Upload (Join-Path $ServerDir 'enshrouded_server.kfc_resources') 'enshrouded_server.kfc_resources' "vanilla-$build"
+    $marker = Join-Path $env:TEMP 'shroudlink_data.txt'
+    Write-DataMarker $ServerDir $build $marker
+    Upload $marker 'shroudlink_data.txt' "before-$stamp"
+    Remove-Item $marker
     # the shroudlink core (as Steam's DLL, which it passes every call on to) and the mods,
     # if unpacked next to this script: core\ (shroudlink-core.zip) or repatch\ (full package)
     $core = @((Join-Path $PSScriptRoot 'core\steam_api64.dll'), (Join-Path $repatch 'steam_api64.dll')) |
