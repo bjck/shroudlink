@@ -115,7 +115,7 @@ cargo build --release
 # target/release/chestsort.dll         -> server mod, put into shroudlink_mods/ next to enshrouded_server.exe
 # target/release/shroudlink_client.dll -> client, install as dinput8.dll next to enshrouded.exe
 ```
-Tested with server build 26083076 / client 26082781. Functions are located by byte
+Tested with server build 26319703 / client 26320373. Functions are located by byte
 signatures, so most game updates need no rebuild; the EML data patches have to be
 re-applied for every build (`UPDATE-SERVER.bat`).
 
