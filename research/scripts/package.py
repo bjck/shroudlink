@@ -11,6 +11,8 @@ Writes, with SHA256SUMS.txt:
   chestsort-enshrouded.zip             everything for a server in one zip
   shroudlink-singleplayer.zip          addon + core (shroudlink_core.dll) + mods, for a game
                                        that hosts its own world
+  shroudlink-eml-stacks-chests.zip     only the two EML Lua mods, for hosts that run EML; no
+                                       scripts (Nexus quarantines zips with the update scripts)
 The split zips unpack into one folder side by side (UPDATE-SERVER finds the core in core/
 or repatch/). Their READMEs are in dist/packages/. The other mods in the workspace
 (lantern, travel, hello_mod) are built but not released.
@@ -99,6 +101,13 @@ def singleplayer_files(target):
     return files
 
 
+def eml_files():
+    files = tree(MOD / "eml", "")
+    files = [(f, name.lstrip("/")) for f, name in files]
+    files.append((PACKAGES / "eml-stacks-chests" / "README.txt", "README-eml-stacks-chests.txt"))
+    return files
+
+
 def stacks_files():
     pkg = DIST / "chestsort-enshrouded"
     files = [
@@ -142,6 +151,7 @@ def main():
         "shroudlink-core.zip": core_files(a.target),
         "shroudlink-bigger-stacks-chests.zip": stacks_files(),
         "shroudlink-singleplayer.zip": singleplayer_files(a.target),
+        "shroudlink-eml-stacks-chests.zip": eml_files(),
     }
     contents.update({f"shroudlink-mod-{m}.zip": mod_files(a.target, m) for m in SERVER_MODS})
     zips = []
