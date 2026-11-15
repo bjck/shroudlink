@@ -140,8 +140,13 @@ pub struct TabList {
     pub len: usize,
 }
 
-/// Social, World, Journal, Crafting, Backpack, Character, Skills.
+/// Pages of the player menu: Social, World, Journal, Crafting, Backpack, Character, Skills.
+/// The tab list leaves SOCIAL out when a game state flag is clear (singleplayer on some
+/// setups); the row then skips page 0, so a tab's page is its position plus the pages
+/// left out in front.
 const PLAYER_MENU_TABS: usize = 7;
+/// Length of the player menu's tab row last seen (0: none yet), logged when it changes.
+static PLAYER_ROW_LEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 const TAB_ENTRY_SIZE: usize = 0x40;
 /// Tab entry fields (built by the tab list function): input action of the key label
 /// (0x8b: none), label text (pointer, length, string id; the id doubles as frame key),
@@ -507,7 +512,7 @@ impl Api {
 
 /// Key (entry +0x28) of the last player menu tab, after which the MODS tab is drawn.
 static LAST_PLAYER_TAB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Keys of the player menu tabs in row order; a tab's position is its page index.
+/// Keys of the player menu tabs by page index (0: the page has no tab).
 static PLAYER_TAB_KEYS: [std::sync::atomic::AtomicU64; PLAYER_MENU_TABS] = [const { std::sync::atomic::AtomicU64::new(0) }; PLAYER_MENU_TABS];
 /// The game tab clicked while the MODS page was open (`NO_PAGE`: none); the player menu
 /// hook shows it instead of the page it hid.
@@ -559,14 +564,29 @@ unsafe fn draw_native_mods_tab(api: &Api) {
 unsafe extern "system" fn tab_list_hook(menu: u8, list: *mut TabList) -> *mut c_void {
     let api = API.get().unwrap();
     let r = api.tab_list.call(menu, list);
-    // the player menu passes the id of its current page; it is the only tab row with 7 tabs
-    if !list.is_null() && (*list).len == PLAYER_MENU_TABS {
-        let last = (*list).data.add(((*list).len - 1) * TAB_ENTRY_SIZE);
-        LAST_PLAYER_TAB.store(*(last.add(0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
-        TAB_TEMPLATE.lock().unwrap().copy_from_slice(std::slice::from_raw_parts(last, TAB_ENTRY_SIZE));
-        for (i, k) in PLAYER_TAB_KEYS.iter().enumerate() {
-            k.store(*((*list).data.add(i * TAB_ENTRY_SIZE + 0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
-        }
+    // the player menu's row is the one whose selection is the player menu's page field;
+    // its length varies (SOCIAL is not always there), so it is not counted
+    let page_field = api.holder().map(|h| h + PLAYER_PAGE_OFFSET);
+    if list.is_null() || r.is_null() || page_field != Some(r as usize) {
+        return r;
+    }
+    let len = (*list).len;
+    if PLAYER_ROW_LEN.swap(len, std::sync::atomic::Ordering::Relaxed) != len {
+        log!("player menu: {len} tabs");
+    }
+    if !(1..=PLAYER_MENU_TABS).contains(&len) {
+        return r;
+    }
+    let last = (*list).data.add((len - 1) * TAB_ENTRY_SIZE);
+    LAST_PLAYER_TAB.store(*(last.add(0x28) as *const u64), std::sync::atomic::Ordering::Relaxed);
+    TAB_TEMPLATE.lock().unwrap().copy_from_slice(std::slice::from_raw_parts(last, TAB_ENTRY_SIZE));
+    let first = PLAYER_MENU_TABS - len;
+    for (page, k) in PLAYER_TAB_KEYS.iter().enumerate() {
+        let key = match page.checked_sub(first) {
+            Some(i) => *((*list).data.add(i * TAB_ENTRY_SIZE + 0x28) as *const u64),
+            None => 0,
+        };
+        k.store(key, std::sync::atomic::Ordering::Relaxed);
     }
     r
 }
@@ -610,10 +630,10 @@ unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
             *page = NO_PAGE;
             let r = api.player_menu.call(menu, mode);
             // the tab row writes its selection into this field every frame. With the
-            // game-drawn MODS tab the row has eight tabs and NO_PAGE is the MODS tab, so
-            // a game page here is a click on its tab (or Q/E). The addon-drawn tab leaves
-            // seven, the selection comes back as the last tab every frame, and clicks are
-            // hit-tested in tab_widget_hook instead.
+            // game-drawn MODS tab the row has one tab more than the game's and NO_PAGE is
+            // the MODS tab, so a game page here is a click on its tab (or Q/E). The
+            // addon-drawn tab leaves the game's tabs alone, the selection comes back as the
+            // last tab every frame, and clicks are hit-tested in tab_widget_hook instead.
             let chosen = match *page {
                 written if written < NO_PAGE && NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) => written,
                 _ => CHOSEN_PAGE.swap(NO_PAGE, std::sync::atomic::Ordering::Relaxed),
