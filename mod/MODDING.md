@@ -55,6 +55,18 @@ A mod can:
   to `fraction`), also while playing, bottom right and see-through; players drag it while
   a menu is open and the addon keeps where. Send it again when it changes, with no rows to
   remove it; older addons ignore it. The damage meter's fight panel is one (`mods/meter`).
+- give a menu entry a **tab of its own** in the player menu, after MODS (`Tab`: owner, the
+  entry's id, a label; an empty label removes it). The addon draws it with the game's tab
+  widget; a click shows that entry's windows alone over the whole page, with the same
+  `menu` event a click on the entry sends. Older addons ignore it, so keep the entry in
+  the MODS list too. `mods/ascension` puts Paragon there.
+- show a **skill tree** on the game's own SKILLS page (`SkillTree`: nodes with position,
+  name, description, rank / max rank and an icon borrowed from a game skill by its id;
+  links; optionally the point counter and a tint for its emblem). A tab with the same id
+  shows it. The game draws it with its own nodes, lines, tooltips and camera; investing in
+  a node comes back as a `ui_event` click (window = tree id, node = node id), never as the
+  game's own unlock. The addon logs the game skills with an icon once ("skill tree
+  catalog" in `shroudlink_client.log`). How it works: `docs/research/skilltree-ui.md`.
 - players can switch a mod off in their addon (the [X] in the MODS page list, since 0.5.0):
   the addon then hides that mod's windows, backpack rows, HUD panels and messages and slot
   marks, and ignores its slot keys. Your mod is not told and keeps running for that player,
@@ -67,7 +79,8 @@ A mod can:
 - work with the **world** from any callback (`host.world()`): players, positions,
   teleport, any component, nearby inventories and entities with a component
   (`entities_near`), moving stacks or exact counts (`move_items`), creating and removing plain items
-  (`give_items`, `remove_items`), chest names (`chest_name`), and vanilla **buffs**
+  (`give_items`, `remove_items`), chest names (`chest_name`), **attributes** (`attribute`,
+  `set_attribute`: Level, Strength_Base, Health_Max_Adder …, ids in `shroudlink_sdk::attr`), and vanilla **buffs**
   (`apply_buff`, through the game's impact VM: `server/src/buffs.rs`). `on_tick` runs
   about once a second. `mods/travel`, `mods/storage`, `mods/lantern` and `mods/assistants`
   use them.

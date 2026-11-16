@@ -78,7 +78,14 @@ A survivor's window has tabs: Orders (stations, products, ordering, the orders),
 per crop kind how many are ripe or waiting for a seedling, the seedlings in stock and how
 many they keep) and Notifications. The window lists open orders with their sub-orders, then the last finished ones; clicking
 an open order cancels it, clicking a finished one clears it ("Clear finished" clears all).
-Feedback on a click shows under the order row and as a notification.
+Feedback on a click shows under the order row and as a notification. An order that cannot
+go on by itself (needs items no sub-order makes, no station, power, water, full chests) is
+announced once per reason ("the Farmer is stuck on 5 Bread (needs 3 Flour)") after a minute
+with that reason; the reason is keyed without counts, so items arriving one by one do not
+repeat it. The minute is there because right after a player arrives the chests further away
+show up only after a while (seen in game: an order "needed" Lizard parts for 25 s that were
+in the base all along). Items move between
+chests and stations directly: survivors walk to their stations, never to the chests.
 
 ### Walking and working at stations
 

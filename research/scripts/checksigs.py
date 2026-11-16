@@ -3,7 +3,8 @@
 usage: python checksigs.py <enshrouded_server.exe> [--client <memory dump of enshrouded.exe>]
 
 Server hook points come from mod/server/src/hooks.rs (POINTS), client ones from the
-SIG_* constants in mod/client/src. Each must match exactly once in .text; the output lists
+SIG_* constants in mod/client/src. Each must match exactly once in .text (the attributes'
+recompute template twice: the u32 and the s32 copy); the output lists
 which features would stay on. The client exe on disk is DRM-packed, so client signatures
 need a memory dump (dumpmod.py). Exit code 1 if any server hook point fails.
 """
@@ -32,6 +33,12 @@ def server_points():
     return re.findall(r'HookPoint \{ name: "(\w+)", feature: Feature::(\w+), signature: "([0-9A-F? ]+)" \}', source)
 
 
+def server_templates():
+    """Patterns the core expects several times: (name, feature, signature, expected matches)."""
+    source = (ROOT / "mod/server/src/attributes.rs").read_text(encoding="utf-8")
+    return [("attr_recalc", "Attributes", sig, 2) for sig in re.findall(r'const RECALC_TEMPLATE: &str = "([0-9A-F? ]+)";', source)]
+
+
 def client_points():
     points = []
     for path in sorted((ROOT / "mod/client/src").glob("*.rs")):
@@ -50,9 +57,9 @@ def main():
     code = text_section(server_exe)
     features = {}
     print(f"server: {server_exe}")
-    for name, feature, sig in server_points():
+    for name, feature, sig, expected in [(*p, 1) for p in server_points()] + server_templates():
         n = matches(code, sig)
-        ok = n == 1
+        ok = n == expected
         features.setdefault(feature, True)
         features[feature] &= ok
         print(f"  {'ok  ' if ok else 'FAIL'} {name:<14} {feature:<10} {n} match(es)")

@@ -15,6 +15,7 @@
 //! the hooks and mods work unchanged; the addon reaches this host through the game's
 //! own loopback.
 
+mod attributes;
 mod buffs;
 mod components;
 mod events;
@@ -24,6 +25,7 @@ mod game_api;
 mod hooks;
 mod items;
 mod link_host;
+mod loot;
 mod mods;
 mod names;
 mod plugins;
@@ -164,6 +166,16 @@ fn init() {
     if hooks::available(hooks::Feature::Buffs) {
         if let Err(e) = buffs::install() {
             hooks::disable(hooks::Feature::Buffs, e);
+        }
+    }
+    if hooks::available(hooks::Feature::Attributes) {
+        if let Err(e) = attributes::install(&module) {
+            hooks::disable(hooks::Feature::Attributes, e);
+        }
+    }
+    if hooks::available(hooks::Feature::Loot) {
+        if let Err(e) = loot::install() {
+            hooks::disable(hooks::Feature::Loot, e);
         }
     }
     selftest::install();

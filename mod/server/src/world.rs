@@ -26,6 +26,9 @@ static NAMES: Mutex<Vec<(u32, String)>> = Mutex::new(Vec::new());
 /// Addon session -> the name it sent at the welcome, before the session has a player.
 static CLIENT_NAMES: Mutex<Vec<(u64, String)>> = Mutex::new(Vec::new());
 
+/// Addon session -> the SteamID64 its addon reported (addons after 0.7.2).
+static CLIENT_ACCOUNTS: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
+
 /// An addon reported its backpack pages (and its player's name): find the player whose
 /// inventory has them.
 pub fn identify(client: u64, pages: &[u32], name: Option<String>) -> Option<u32> {
@@ -77,6 +80,31 @@ fn set_player_name(player: u32, name: String) {
 pub fn forget_client(client: u64) {
     CLIENTS.lock().unwrap().retain(|&(c, _)| c != client);
     CLIENT_NAMES.lock().unwrap().retain(|(c, _)| *c != client);
+    CLIENT_ACCOUNTS.lock().unwrap().retain(|(c, _)| *c != client);
+}
+
+/// The addon reported its Steam account.
+pub fn account_client(client: u64, account: u64) {
+    let mut accounts = CLIENT_ACCOUNTS.lock().unwrap();
+    accounts.retain(|(c, _)| *c != client);
+    accounts.push((client, account));
+}
+
+/// The Steam account (SteamID64) of a player, as reported by their addon. Identifies the
+/// account across sessions (entity ids do not), not the character; the addon reports it
+/// itself, so it is as trustworthy as the player's PC.
+pub fn player_account(player: u32) -> Option<u64> {
+    let client = CLIENTS.lock().unwrap().iter().find(|&&(_, p)| p == player).map(|&(c, _)| c)?;
+    CLIENT_ACCOUNTS.lock().unwrap().iter().find(|(c, _)| *c == client).map(|&(_, a)| a)
+}
+
+/// The Steam account an addon session reported (the self-test's session has no player).
+pub fn client_account(client: u64) -> Option<u64> {
+    CLIENT_ACCOUNTS.lock().unwrap().iter().find(|(c, _)| *c == client).map(|&(_, a)| a)
+}
+
+pub unsafe extern "C" fn api_player_account(player: u32) -> u64 {
+    player_account(player).unwrap_or(0)
 }
 
 /// Addons without a player yet, before they opened a chest: when exactly one addon and

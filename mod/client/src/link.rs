@@ -169,9 +169,11 @@ pub(crate) fn dispatch(message: &Value) {
                     crate::ui::note("This server runs an older shroudlink: some mod windows may look wrong. Ask the server owner to update it.".into());
                 }
                 send(json!({ "mod": "shroudlink", "op": "ping", "echo": "hello from the client addon" }));
-                // mods that show players use it from the start, not only after the first chest
-                if let Some(name) = crate::steam::persona_name() {
-                    send(json!({ "mod": "shroudlink", "op": "name", "name": name }));
+                // mods that show players or keep progress per account use them from the start,
+                // not only after the first chest (the Steam ID as a string: JSON numbers lose u64s)
+                let (name, id) = (crate::steam::persona_name(), crate::steam::steam_id());
+                if name.is_some() || id.is_some() {
+                    send(json!({ "mod": "shroudlink", "op": "name", "name": name, "steam_id": id.map(|i| i.to_string()) }));
                 }
                 crate::slots::on_welcome(message.get("server").and_then(Value::as_str).unwrap_or("server"), &mods);
             }

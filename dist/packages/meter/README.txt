@@ -2,7 +2,8 @@ meter - damage meter (shroudlink mod)
 =======================================
 MODS > Damage meter: damage, damage taken and healing per player for the last fight and
 the session, and what killed you. A small panel on the HUD shows the fight's damage per
-player (switch it off on the meter's page). Players without the addon are counted too.
+player, and a message sums up each fight when it ends (switch either off on the meter's
+page). Players without the addon are counted too.
 
 REQUIRES the shroudlink core (shroudlink-core.zip) and, to see it, the player addon
 (shroudlink-client.zip).
