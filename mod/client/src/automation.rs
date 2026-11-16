@@ -5,8 +5,9 @@
 //!
 //! `{"cmd":"state"}` -> screen, connection, mod menu and windows, backpack sections, HUD
 //! messages, cursor, and every backpack slot drawn in the last frame with its rectangle.
-//! Rectangles and the cursor are in UI units (1080 high); `client` is the window size in
-//! pixels, so pixel = unit * client.height / 1080.
+//! Rectangles and the cursor are in UI units; `client` is the window size in pixels. The
+//! UI is 1080 units high on windows wider than 16:9 (pixel = unit * client.height / 1080)
+//! and 1920 wide on narrower ones (pixel = unit * client.width / 1920).
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;

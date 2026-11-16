@@ -10,10 +10,11 @@ use std::sync::Mutex;
 
 use chestsort_common::log;
 use windows_sys::core::BOOL;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, TRUE, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_BACK, VK_ESCAPE, VK_RETURN};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, DefWindowProcW, EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW,
+    CallWindowProcW, DefWindowProcW, EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId,
+    IsWindowVisible, SetWindowLongPtrW,
     GWLP_WNDPROC, WM_CHAR, WM_INPUT, WM_KEYDOWN, WM_SYSCHAR, WM_SYSKEYDOWN,
 };
 
@@ -225,14 +226,43 @@ unsafe fn is_raw_key_press(lparam: LPARAM) -> bool {
     raw.data.keyboard.Flags as u32 & RI_KEY_BREAK == 0
 }
 
+/// The best game window candidate so far (`find_window`'s state).
+struct Candidate {
+    hwnd: HWND,
+    titled: bool,
+    area: i64,
+}
+
 unsafe extern "system" fn find_window(hwnd: HWND, found: LPARAM) -> BOOL {
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, &mut pid);
-    if pid == std::process::id() && IsWindowVisible(hwnd) != 0 {
-        *(found as *mut HWND) = hwnd;
-        return 0;
+    if pid != std::process::id() || IsWindowVisible(hwnd) == 0 {
+        return TRUE;
+    }
+    let mut title = [0u16; 32];
+    let len = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32).max(0) as usize;
+    let titled = String::from_utf16_lossy(&title[..len]) == "Enshrouded";
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    GetClientRect(hwnd, &mut r);
+    let area = (r.right - r.left) as i64 * (r.bottom - r.top) as i64;
+    let best = &mut *(found as *mut Candidate);
+    if best.hwnd.is_null() || (titled, area) > (best.titled, best.area) {
+        *best = Candidate { hwnd, titled, area };
     }
     TRUE
+}
+
+/// The game's window: the process's visible top-level window titled "Enshrouded", else its
+/// largest. Hosts such as Kiln may open windows of their own in the game process, so the
+/// first window found or the foreground window is not necessarily the game's.
+pub fn game_window() -> HWND {
+    let hooked = WINDOW.load(Ordering::Relaxed);
+    if hooked != 0 {
+        return hooked as HWND;
+    }
+    let mut best = Candidate { hwnd: std::ptr::null_mut(), titled: false, area: 0 };
+    unsafe { EnumWindows(Some(find_window), &mut best as *mut Candidate as LPARAM) };
+    best.hwnd
 }
 
 /// Hooks the game window once it exists (called every UI frame; retries every ~2 s).
@@ -249,8 +279,7 @@ pub fn ensure() {
 /// Subclasses the game window.
 fn install() -> Result<(), String> {
     unsafe {
-        let mut hwnd: HWND = std::ptr::null_mut();
-        EnumWindows(Some(find_window), &mut hwnd as *mut HWND as LPARAM);
+        let hwnd = game_window();
         if hwnd.is_null() {
             return Err("game window not found".into());
         }

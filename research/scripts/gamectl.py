@@ -9,7 +9,7 @@ usage:
   python gamectl.py ensure                   in the world on the local server, rejoining if needed
   python gamectl.py state                    what the addon sees (JSON)
   python gamectl.py key <KEY>                tap a key (letter, ESC, TAB, ENTER, F1..)
-  python gamectl.py click <x> <y>            left click at UI units (1080 high)
+  python gamectl.py click <x> <y>            left click at UI units (as the addon reports them)
   python gamectl.py hover <x> <y>            move the cursor there
   python gamectl.py shot <out.png>           screenshot of the game window
   python gamectl.py test locks               L on a backpack slot: rim on, rim off
@@ -115,7 +115,8 @@ def to_screen(x, y):
     hwnd = window()
     rect = wt.RECT()
     user32.GetClientRect(hwnd, ctypes.byref(rect))
-    scale = rect.bottom / 1080.0
+    # the UI is 1080 units high on windows wider than 16:9, 1920 wide on narrower ones
+    scale = rect.bottom / 1080.0 if rect.right * 1080 >= rect.bottom * 1920 else rect.right / 1920.0
     pt = wt.POINT(int(x * scale), int(y * scale))
     user32.ClientToScreen(hwnd, ctypes.byref(pt))
     return pt.x, pt.y

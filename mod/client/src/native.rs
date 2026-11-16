@@ -660,7 +660,7 @@ unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
     }
 }
 
-/// Mouse state in UI units (1920 x 1080 reference, like frame rectangles), updated
+/// Mouse state in UI units (like frame rectangles, see `ui_size`), updated
 /// once per UI frame. The game's own per-frame interaction state does not cope
 /// with windows whose content is replaced from outside, so mod buttons test the
 /// cursor against their layout rectangle themselves.
@@ -674,8 +674,48 @@ struct Mouse {
 
 static MOUSE: std::sync::Mutex<Mouse> = std::sync::Mutex::new(Mouse { pos: (0.0, 0.0), down: false, pressed_at: None, click: None });
 
-/// UI reference height; widths scale with the window's aspect ratio.
+/// The UI's reference size: the game keeps the UI 1080 units high on screens wider than
+/// 16:9 and 1920 units wide on narrower ones (measured: 3385 x 1080 at 2144 x 684 pixels,
+/// 1920 x 1204.5 at 1280 x 803).
+const UI_WIDTH: f32 = 1920.0;
 const UI_HEIGHT: f32 = 1080.0;
+
+/// The UI's size in UI units for a window of `width` x `height` pixels.
+fn ui_size(width: f32, height: f32) -> (f32, f32) {
+    if width * UI_HEIGHT >= height * UI_WIDTH {
+        (UI_HEIGHT * width / height, UI_HEIGHT)
+    } else {
+        (UI_WIDTH, UI_WIDTH * height / width)
+    }
+}
+
+/// The UI's size in UI units, from the layout rectangle of a full-screen root frame
+/// (`note_ui_root`); None until one was laid out.
+static UI_ROOT: std::sync::Mutex<Option<(f32, f32)>> = std::sync::Mutex::new(None);
+
+/// Records the layout rectangle of a layer's root frame. Only a rectangle that looks like
+/// the whole screen counts (at the origin, at least 900 units high, an aspect ratio between
+/// 5:4 and 32:9); anything else leaves the mapping as it was.
+pub fn note_ui_root(rect: [f32; 4]) {
+    let [x, y, w, h] = rect;
+    if !(x.abs() < 1.0 && y.abs() < 1.0 && (900.0..=4000.0).contains(&h) && (1.25..=3.6).contains(&(w / h))) {
+        return;
+    }
+    let mut root = UI_ROOT.lock().unwrap();
+    if *root != Some((w, h)) {
+        log!("ui: the screen is {w} x {h} UI units, the window {:?} pixels", client_size());
+        *root = Some((w, h));
+    }
+}
+
+/// A point in the game window's client area (pixels) in UI units. The UI (`root` as
+/// measured, else `ui_size`) is fitted into the window and centred, in case a measured UI
+/// has another aspect ratio than the window.
+fn client_to_ui(x: f32, y: f32, width: f32, height: f32, root: Option<(f32, f32)>) -> (f32, f32) {
+    let (w, h) = root.unwrap_or_else(|| ui_size(width, height));
+    let scale = (width / w).min(height / h);
+    ((x - (width - w * scale) / 2.0) / scale, (y - (height - h * scale) / 2.0) / scale)
+}
 
 unsafe fn update_mouse() {
     use windows_sys::Win32::Foundation::{POINT, RECT};
@@ -684,24 +724,26 @@ unsafe fn update_mouse() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId};
     let mut m = MOUSE.lock().unwrap();
     m.click = None;
-    let hwnd = GetForegroundWindow();
     let mut pid = 0u32;
-    GetWindowThreadProcessId(hwnd, &mut pid);
-    if pid != std::process::id() {
+    GetWindowThreadProcessId(GetForegroundWindow(), &mut pid);
+    let hwnd = crate::input::game_window();
+    if pid != std::process::id() || hwnd.is_null() {
         m.down = false;
         m.pressed_at = None;
         return;
     }
+    // measured against the game window, not the foreground one: that may be a window
+    // another mod opened in the game process
     let mut p = POINT { x: 0, y: 0 };
     GetCursorPos(&mut p);
     ScreenToClient(hwnd, &mut p);
     let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     GetClientRect(hwnd, &mut r);
-    if r.bottom <= 0 {
+    if r.right <= 0 || r.bottom <= 0 {
         return;
     }
-    let scale = UI_HEIGHT / r.bottom as f32;
-    m.pos = (p.x as f32 * scale, p.y as f32 * scale);
+    let root = *UI_ROOT.lock().unwrap();
+    m.pos = client_to_ui(p.x as f32, p.y as f32, r.right as f32, r.bottom as f32, root);
     let down = GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0;
     if down && !m.down {
         m.pressed_at = Some(m.pos);
@@ -717,10 +759,9 @@ unsafe fn update_mouse() {
 /// The game window's client size in pixels (0, 0 when unknown).
 pub fn client_size() -> (i32, i32) {
     use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, GetClientRect};
-    let title: Vec<u16> = "Enshrouded ".encode_utf16().collect();
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
     unsafe {
-        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        let hwnd = crate::input::game_window();
         let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
         if !hwnd.is_null() {
             GetClientRect(hwnd, &mut r);
@@ -861,8 +902,8 @@ unsafe extern "system" fn slot_render_hook(render: *mut u8, desc: *mut u8, state
 }
 
 unsafe extern "system" fn dispatch_hook() {
-    update_mouse();
     crate::input::ensure();
+    update_mouse();
     let api = API.get().unwrap();
     api.dispatch.call();
     crate::ui::draw(api);
@@ -969,5 +1010,38 @@ pub fn uninstall() {
                 let _ = d.disable();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_to_ui;
+
+    fn close(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01
+    }
+
+    #[test]
+    fn a_16_9_window_maps_like_before() {
+        // 1280 x 720: 1.5 units per pixel on both axes, with or without a measured root
+        assert!(close(client_to_ui(640.0, 360.0, 1280.0, 720.0, None), (960.0, 540.0)));
+        assert!(close(client_to_ui(640.0, 360.0, 1280.0, 720.0, Some((1920.0, 1080.0))), (960.0, 540.0)));
+    }
+
+    #[test]
+    fn a_ui_as_wide_as_the_window_fills_it() {
+        // without a measured root: 1920 wide on 16:10 (the Steam Deck), 1080 high on 21:9
+        assert!(close(client_to_ui(1280.0, 800.0, 1280.0, 800.0, None), (1920.0, 1200.0)));
+        assert!(close(client_to_ui(640.0, 400.0, 1280.0, 800.0, None), (960.0, 600.0)));
+        assert!(close(client_to_ui(2560.0, 1080.0, 2560.0, 1080.0, None), (2560.0, 1080.0)));
+        // a 1920 x 1200 UI on 1280 x 800
+        assert!(close(client_to_ui(1280.0, 800.0, 1280.0, 800.0, Some((1920.0, 1200.0))), (1920.0, 1200.0)));
+    }
+
+    #[test]
+    fn a_measured_ui_of_another_shape_is_centred() {
+        // the game does not do this today; a 1920 x 1080 root in 1280 x 800 gets 40 pixel bars
+        assert!(close(client_to_ui(0.0, 40.0, 1280.0, 800.0, Some((1920.0, 1080.0))), (0.0, 0.0)));
+        assert!(close(client_to_ui(1280.0, 760.0, 1280.0, 800.0, Some((1920.0, 1080.0))), (1920.0, 1080.0)));
     }
 }
