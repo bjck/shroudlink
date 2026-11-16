@@ -499,6 +499,7 @@ unsafe fn draw_notes(d: &mut Draw, notes: &mut Vec<(String, Instant)>, over_menu
     let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkNotes"), if over_menu { LAYER_POPUP } else { LAYER_HUD });
     let mut root_frame = Frame::new();
     api.open_root(&mut root_frame, root);
+    crate::native::note_ui_root(api.rect(&root_frame));
     let mut column = Frame::new();
     api.open_column(&mut column, &d.key("shroudlinkNotes"), 8.0);
     if over_menu {
@@ -564,6 +565,7 @@ unsafe fn draw_huds(d: &mut Draw, ui: &mut UiState, menu: bool) {
         let root = api.begin_layer(&mut layer, &ident("shroudlinkHud", &key, 0), if menu { LAYER_POPUP } else { LAYER_HUD });
         let mut root_frame = Frame::new();
         api.open_root(&mut root_frame, root);
+        crate::native::note_ui_root(api.rect(&root_frame));
         let mut column = Frame::new();
         api.open_column(&mut column, &ident("shroudlinkHudColumn", &key, 0), 0.0);
         api.set_alignment(&column, 0x0303);
@@ -786,6 +788,7 @@ unsafe fn draw_page(d: &mut Draw, ui: &mut UiState, pending: &mut Pending) {
     let root = api.begin_layer(&mut layer, &UiStr::name("shroudlinkPage"), LAYER_PAGE);
     let mut root_frame = Frame::new();
     api.open_root(&mut root_frame, root);
+    crate::native::note_ui_root(api.rect(&root_frame));
     let mut column = Frame::new();
     api.open_column(&mut column, &d.key("shroudlinkPageColumn"), 0.0);
     api.set_alignment(&column, 0x0102);
