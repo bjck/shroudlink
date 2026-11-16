@@ -213,9 +213,14 @@ click dismisses one.
 - Layers are identified by kind: one layer per kind and frame, drawn in the order of their
   kind: the inventory screen 6, the MODS page 0xd, the game's item tooltips 0xe (they open
   their own layer), popups 0x1d.
-- Mod buttons test the cursor against their layout rectangle (`node+0x114`, UI units of a
-  1920x1080 reference) instead of the game's interaction state, which misfires when a window
-  is replaced from outside.
+- Mod buttons test the cursor against their layout rectangle (`node+0x114`, UI units)
+  instead of the game's interaction state, which misfires when a window is replaced from
+  outside. UI units are not always 1080 high: the game keeps the UI 1080 high on screens
+  wider than 16:9 and **1920 wide on narrower ones** (16:10, the Steam Deck: 1920 x 1200).
+  The cursor is read against the game window (the visible window titled "Enshrouded", not
+  the foreground one, which a host such as Kiln may own) and mapped by the root frame's
+  layout rectangle when one was laid out; `shroudlink_client.log` names the UI size it
+  measured ("ui: the screen is ...").
 - Alignment (`node+0x6c`) places a frame in its parent, not its children: centre a label
   with padding.
 - Panel backgrounds (`FUN_7ff6232fd910`, descriptor: +0 style, +4 opacity, +8 highlight,

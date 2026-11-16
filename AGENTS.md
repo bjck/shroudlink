@@ -135,7 +135,8 @@ disk. Every push and pull request is tested and built there too.
 - In game automation: E interacts with what the *camera* looks at; 1500 mouse counts turn
   it about 180 degrees. `gamectl.py goto <chest>` teleports and sweeps the camera.
 - UI: frames need unique keys (`UiStr::keyed`) and explicit sizes; widget clicks use
-  our own hit testing on layout rects (node+0x114, 1080p UI units); the text input
+  our own hit testing on layout rects (node+0x114, UI units: 1080 high on screens wider than
+  16:9, 1920 wide on narrower ones such as the Steam Deck); the text input
   subclasses the game's WndProc and must swallow key **downs** only, never releases or
   mouse input (otherwise keys get stuck).
 - The user wants UI **embedded** in the game's own panels, not floating windows.
