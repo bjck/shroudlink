@@ -96,6 +96,27 @@ pub struct Assistants {
     news: Vec<(u32, String, Kind, Vec<(u32, u32)>)>,
     /// the tick of the last such notification
     news_sent: u32,
+    /// open orders that could not go on, by order id: the reason announced last (see [`stuck`])
+    stuck: HashMap<u32, String>,
+}
+
+/// Why an order cannot go on by itself, for a notification: (key, text). `uncovered`: what
+/// it is missing that no sub-order makes. The key leaves out counts, so items arriving one by
+/// one do not announce it again. None while it works, waits for a sub-order or for a station
+/// the player runs.
+fn stuck(status: &Status, uncovered: &[(u32, u32)], name: impl Fn(u32) -> String) -> Option<(String, String)> {
+    match status {
+        Status::Missing(_) | Status::Waiting(_) if !uncovered.is_empty() => {
+            let mut items: Vec<u32> = uncovered.iter().map(|m| m.0).collect();
+            items.sort();
+            Some((format!("needs {items:?}"), Status::Missing(uncovered.to_vec()).describe(name)))
+        }
+        Status::NoStation | Status::NeedsEnergy | Status::NeedsWater | Status::StorageFull => {
+            let text = status.describe(name);
+            Some((text.clone(), text))
+        }
+        _ => None,
+    }
 }
 
 /// The survivor of a workshop ("Farmer": the Farmer and the Farmer's assistant).
@@ -571,6 +592,8 @@ impl Assistants {
                 Some(&entity) => work::step(table(), order, entity, &base, &mut claimed),
                 None => Status::Away,
             };
+            // missing and made by no sub-order: the players have to bring it
+            let mut uncovered: Vec<(u32, u32)> = Vec::new();
             // short of something a station here makes: order it first, then wait for it
             if let (Status::Missing(missing), Some(&entity)) = (&order.status, at.get(&order.npc)) {
                 let mut stations: Vec<u32> = base.stations_near(entity, work::RADIUS).into_iter().map(|s| s.workshop).collect();
@@ -581,8 +604,19 @@ impl Assistants {
                     subs.push((order.id, sub, order.by.clone()));
                 }
                 let coming: Vec<u32> = missing.iter().map(|m| m.0).filter(|&item| open.contains(&(order.id, item)) || subs.iter().any(|s| s.0 == order.id && s.1.product == item)).collect();
+                uncovered = missing.iter().filter(|m| !coming.contains(&m.0)).copied().collect();
                 if !coming.is_empty() {
                     order.status = Status::Waiting(coming);
+                }
+            }
+            // stuck: told once per reason, as the window may be closed
+            if let Some((key, text)) = stuck(&order.status, &uncovered, names::item) {
+                if self.stuck.get(&order.id) != Some(&key) {
+                    if !muted.contains(&order.npc) {
+                        finished.push(format!("{} is stuck on {} {} ({text}).", npc_name(order.npc), order.amount, names::item(order.product)));
+                    }
+                    log!("assistants: order {} stuck: {text}", order.id);
+                    self.stuck.insert(order.id, key);
                 }
             }
             // at the stations the order runs on
@@ -617,6 +651,8 @@ impl Assistants {
             }
             changed = true;
         }
+        let orders = &self.orders.list;
+        self.stuck.retain(|id, _| orders.iter().any(|o| o.id == *id && !o.done()));
         // a finished order no longer needs what its sub-orders still make
         let done: Vec<u32> = self.orders.list.iter().filter(|o| o.done()).map(|o| o.id).collect();
         let orphans: Vec<u32> = done.iter().flat_map(|&d| self.orders.children(d)).collect();
@@ -884,6 +920,22 @@ export_mod!(Assistants);
 mod tests {
     use super::*;
     use shroudlink_sdk::testing::MockHost;
+
+    #[test]
+    fn a_stuck_order_names_what_the_players_must_bring_or_fix() {
+        let name = |i: u32| format!("item {i}");
+        let (key, text) = stuck(&Status::Missing(vec![(5, 3), (2, 1)]), &[(5, 3), (2, 1)], name).unwrap();
+        assert_eq!(text, "needs 3 item 5, 1 item 2");
+        // one more item arrived: the same reason, not announced again
+        assert_eq!(stuck(&Status::Missing(vec![(5, 2), (2, 1)]), &[(5, 2), (2, 1)], name).unwrap().0, key);
+        // Sugar (7) is being made by a sub-order, Iron Ore (5) has to be brought
+        assert_eq!(stuck(&Status::Waiting(vec![7]), &[(5, 3)], name).unwrap().1, "needs 3 item 5");
+        assert_eq!(stuck(&Status::Waiting(vec![7]), &[], name), None, "a sub-order makes all of it");
+        assert_eq!(stuck(&Status::NeedsWater, &[], name).unwrap().1, "needs water: place a Well near it");
+        for fine in [Status::Running, Status::Away, Status::Busy("the Oven is making Bread".into()), Status::Done] {
+            assert_eq!(stuck(&fine, &[], name), None);
+        }
+    }
 
     #[test]
     fn the_menu_entry_opens_a_window_that_explains_what_to_do() {
