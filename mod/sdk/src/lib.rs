@@ -27,23 +27,9 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 pub use serde_json::{json, Value};
 pub use shroudlink::ui;
 
-mod attribute_ids;
 mod component_types;
 mod event_types;
 pub mod events;
-
-/// Attribute slot ids (`attr::STRENGTH_BASE`, `attr::LEVEL` …) for [`World::attribute`].
-/// A group (`Strength`) is computed from its slots by the game's formulas; mods write the
-/// inputs (`_BASE`, `_ADDER`, `_MULTIPLIER`), never the result or the `_FLAME_BASE` slots
-/// the game rewrites every tick.
-pub mod attr {
-    pub use crate::attribute_ids::*;
-
-    /// The id of a slot by its name ("Strength_Base").
-    pub fn id_of(name: &str) -> Option<u32> {
-        ALL.iter().find(|a| a.1 == name).map(|a| a.0)
-    }
-}
 
 /// Component types by name (from the game's reflection data).
 pub mod components {
@@ -69,10 +55,8 @@ pub use events::{GameEvent, Known};
 /// ABI version of [`HostApi`] / [`ModDecl`]. The host also loads v1-v4 mods. `HostApi`
 /// tells its own version: functions newer than it must not be called (the SDK checks).
 /// v5 appends `apply_buff` to `HostApi` and `on_tick` to `ModDecl`; v6 appends
-/// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`;
-/// v8 `world_chest_name`; v9 `attribute`, `set_attribute`, `player_account` and
-/// `set_loot_boost`.
-pub const ABI_VERSION: u32 = 9;
+/// `entities_near` and `move_items` to `HostApi`; v7 appends `give_items` and `remove_items`.
+pub const ABI_VERSION: u32 = 8;
 
 /// One inventory slot. `id` is `page entity | slot index << 32` (the same on client and
 /// server within a session); an empty slot has `count == 0`.
@@ -171,17 +155,6 @@ pub struct HostApi {
     /// Copies up to `cap` bytes of an entity's custom name, from any callback; returns its
     /// full length (0: none or not known yet).
     pub world_chest_name: unsafe extern "C" fn(entity: u32, buf: *mut u8, cap: usize) -> usize,
-    // v9
-    /// Reads an attribute slot (`attr::*`) of an entity into `out`; false if it has none.
-    pub attribute: unsafe extern "C" fn(entity: u32, id: u32, out: *mut f64) -> bool,
-    /// Writes an attribute slot and lets the game recompute what depends on it; false if
-    /// refused (no such slot, the feature is off, a player's Level or Experience).
-    pub set_attribute: unsafe extern "C" fn(entity: u32, id: u32, value: f64) -> bool,
-    /// The SteamID64 of a player's account as their addon reported it; 0: unknown.
-    pub player_account: unsafe extern "C" fn(player: u32) -> u64,
-    /// Lifts every following loot roll: at least `min_level`, plus `add_levels`, rarity
-    /// weights multiplied by `rarity[0..5]` (null: unchanged); all neutral switches it off.
-    pub set_loot_boost: unsafe extern "C" fn(min_level: f64, add_levels: f64, rarity: *const f64) -> bool,
 }
 
 /// What a mod DLL exports through `shroudlink_mod_v2`. Strings are UTF-8 with a length.
@@ -421,59 +394,6 @@ impl World<'_> {
             unsafe { (self.api.world_chest_name)(entity, buf.as_mut_ptr(), buf.len()) };
         }
         (n != 0).then(|| String::from_utf8_lossy(&buf[..n.min(buf.len())]).into_owned())
-    }
-
-    /// The Steam account (SteamID64) of a player, reported by their addon (addons after 0.7.2)
-    /// once it has identified the player: the key for progress a mod keeps per account,
-    /// as entity ids change every session. It names the account, not the character, and
-    /// the addon reports it itself (host v9). None for players without the addon.
-    pub fn player_account(&self, player: u32) -> Option<u64> {
-        if self.api.version < 9 {
-            return None;
-        }
-        Some(unsafe { (self.api.player_account)(player) }).filter(|&a| a != 0)
-    }
-
-    /// Makes the game's loot better from now on, for every roll on the server (enemy drops,
-    /// containers, world pickups; not crafting): item level at least `min_level`, plus
-    /// `add_levels`, and the five rarity weights (common, uncommon, rare, epic, legendary)
-    /// multiplied by `rarity`. Each item still clamps its level to its own range (most gear
-    /// stops at 55). `set_loot_boost(0.0, 0.0, [1.0; 5])` gives the game's own loot back.
-    /// False if the server cannot (host v9; the feature "loot").
-    pub fn set_loot_boost(&self, min_level: f64, add_levels: f64, rarity: [f64; 5]) -> bool {
-        if self.api.version < 9 {
-            return false;
-        }
-        unsafe { (self.api.set_loot_boost)(min_level, add_levels, rarity.as_ptr()) }
-    }
-
-    /// An attribute slot of an entity (`attr::LEVEL`, `attr::STRENGTH_BASE` …), None if the
-    /// entity has none or the server cannot read attributes (host v9; the feature
-    /// "attributes"). Integer slots come back as whole numbers.
-    pub fn attribute(&self, entity: u32, id: u32) -> Option<f64> {
-        if self.api.version < 9 {
-            return None;
-        }
-        let mut out = 0f64;
-        unsafe { (self.api.attribute)(entity, id, &mut out) }.then_some(out)
-    }
-
-    /// Writes an attribute slot; the game then recomputes what depends on it (Strength from
-    /// Strength_Base, health max from Constitution …). Integer slots are rounded. Most
-    /// attributes are rebuilt when a player spawns, so re-apply what a mod adds after each
-    /// join. A player's Level and Experience are saved with the character and checked by
-    /// every server: those are refused. Returns false if not written (host v9).
-    pub fn set_attribute(&self, entity: u32, id: u32, value: f64) -> bool {
-        if self.api.version < 9 {
-            return false;
-        }
-        unsafe { (self.api.set_attribute)(entity, id, value) }
-    }
-
-    /// Adds `delta` to an attribute slot; returns the new value, None if not written.
-    pub fn add_attribute(&self, entity: u32, id: u32, delta: f64) -> Option<f64> {
-        let value = self.attribute(entity, id)? + delta;
-        self.set_attribute(entity, id, value).then(|| self.attribute(entity, id)).flatten()
     }
 
     /// A player's name (their Steam name), known once their addon has identified the
@@ -824,23 +744,11 @@ pub mod testing {
     unsafe extern "C" fn remove_items(_: u32, _: u64, _: u32) -> u32 {
         0
     }
-    unsafe extern "C" fn attribute(_: u32, _: u32, _: *mut f64) -> bool {
-        false
-    }
-    unsafe extern "C" fn set_attribute(_: u32, _: u32, _: f64) -> bool {
-        false
-    }
-    unsafe extern "C" fn player_account(_: u32) -> u64 {
-        0
-    }
-    unsafe extern "C" fn set_loot_boost(_: f64, _: f64, _: *const f64) -> bool {
-        false
-    }
 
     impl Default for MockHost {
         fn default() -> Self {
             MockHost {
-                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name, attribute, set_attribute, player_account, set_loot_boost },
+                api: HostApi { version: ABI_VERSION, send, log, slots, is_player, chest_name, max_stack, move_stack, players, position, teleport, player_of, read_component, write_component, inventories_near, inventory, move_stack_between, apply_buff, player_name, entities_near, move_items, give_items, remove_items, world_chest_name },
                 sent: Box::default(),
             }
         }

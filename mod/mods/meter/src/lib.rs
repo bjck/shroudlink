@@ -3,7 +3,7 @@
 //! the hits before them). Counted on the server from the game's own hit events, so players
 //! without the addon are counted too; the addon shows it (MODS -> Damage meter) and a short
 //! message after each fight, and a small panel on the HUD with the fight's damage per
-//! player as bars (both can be switched off on the meter's page). Built from the SDK: game events, `players`, `component`,
+//! player as bars (can be switched off on the meter's page). Built from the SDK: game events, `players`, `component`,
 //! `player_of`, `on_tick`.
 
 mod tally;
@@ -48,8 +48,6 @@ pub struct Meter {
     logged: u32,
     /// clients that switched the HUD panel off (stored on their PC)
     hud_off: HashSet<u64>,
-    /// clients that switched the message after each fight off (stored on their PC)
-    notify_off: HashSet<u64>,
     /// what each client's HUD panel shows, to send only changes
     hud_sent: Vec<(u64, Value)>,
 }
@@ -116,7 +114,6 @@ impl Meter {
             }
         }
         content.push(Node::Toggle { id: "hud".into(), label: "Damage panel on the HUD (drag it while a menu is open)".into(), value: !self.hud_off.contains(&client) });
-        content.push(Node::Toggle { id: "notify".into(), label: "Message when a fight ends".into(), value: !self.notify_off.contains(&client) });
         content.push(Node::Row { children: vec![Node::Button { id: "refresh".into(), label: "Refresh".into() }, Node::Button { id: "reset".into(), label: "Reset session".into() }] });
         ToClient::Open { owner: ID.into(), window: Window { id: "main".into(), title: "Damage meter".into(), content } }
     }
@@ -295,25 +292,20 @@ impl Mod for Meter {
             if data.get("hud") == Some(&Value::Bool(false)) {
                 self.hud_off.insert(client);
             }
-            if data.get("notify") == Some(&Value::Bool(false)) {
-                self.notify_off.insert(client);
-            }
             return;
         }
         let Some(UiEvent { node, event, .. }) = UiEvent::from_message(message) else { return };
         match (node.as_str(), event) {
             ("open", Event::Menu) | ("refresh", Event::Click { .. }) => {}
             ("reset", Event::Click { .. }) => self.tally.reset(),
-            (switch @ ("hud" | "notify"), Event::Change { value }) => {
-                let off = if switch == "hud" { &mut self.hud_off } else { &mut self.notify_off };
-                if value.as_bool().unwrap_or(true) {
-                    off.remove(&client);
+            ("hud", Event::Change { value }) => {
+                let on = value.as_bool().unwrap_or(true);
+                if on {
+                    self.hud_off.remove(&client);
                 } else {
-                    off.insert(client);
+                    self.hud_off.insert(client);
                 }
-                // a store replaces everything the mod stored on that PC: both switches every time
-                let data = shroudlink_sdk::json!({ "hud": !self.hud_off.contains(&client), "notify": !self.notify_off.contains(&client) });
-                host.send(client, &ToClient::Store { owner: ID.into(), data }.to_message());
+                host.send(client, &ToClient::Store { owner: ID.into(), data: shroudlink_sdk::json!({ "hud": on }) }.to_message());
                 self.send_huds(host);
             }
             _ => return,
@@ -325,7 +317,6 @@ impl Mod for Meter {
     fn on_leave(&mut self, _host: &mut Host, client: u64) {
         self.clients.retain(|&c| c != client);
         self.hud_off.remove(&client);
-        self.notify_off.remove(&client);
         self.hud_sent.retain(|(c, _)| *c != client);
     }
 
@@ -350,7 +341,7 @@ impl Mod for Meter {
         self.players = host.world().players().into_iter().collect();
         let now = self.now();
         for (player, fight) in self.tally.finished(now) {
-            let to: Vec<u64> = self.clients.iter().copied().filter(|&c| !self.notify_off.contains(&c) && host.world().player_of(c) == Some(player)).collect();
+            let to: Vec<u64> = self.clients.iter().copied().filter(|&c| host.world().player_of(c) == Some(player)).collect();
             for client in to {
                 host.send(client, &ToClient::Notify { owner: ID.into(), text: summary(&fight) }.to_message());
             }
@@ -414,34 +405,6 @@ mod tests {
         let sent = host.take_sent();
         assert!(sent.iter().any(|(_, m)| m["op"] == "store" && m["data"]["hud"] == false));
         assert!(sent.iter().any(|(_, m)| m["op"] == "hud" && m["rows"].as_array().unwrap().is_empty()), "switched off: removed");
-    }
-
-    #[test]
-    fn the_message_after_a_fight_can_be_switched_off() {
-        let mut m = Meter::default();
-        let mut host = MockHost::default();
-        host.set_player(7);
-        m.on_join(&mut host.host(), 1);
-        let players = |e: u32| e == 7;
-        let hit = Hit { source: 7, target: 99, amount: 300, healing: false, killing_blow: false, crit: false, damage_types: 0, attacker: String::new() };
-        let fight_over = |m: &mut Meter, host: &mut MockHost| {
-            // long enough ago that the fight is over at the next tick
-            m.tally.hit(-600.0, &hit, players);
-            host.take_sent();
-            m.on_tick(&mut host.host());
-            host.take_sent().into_iter().filter(|(_, m)| m["op"] == "notify").count()
-        };
-        assert_eq!(fight_over(&mut m, &mut host), 1);
-        let off = UiEvent { window: "main".into(), node: "notify".into(), event: Event::Change { value: Value::Bool(false) } };
-        m.on_message(&mut host.host(), 1, &off.to_message(ID));
-        let sent = host.take_sent();
-        let store = sent.iter().find(|(_, m)| m["op"] == "store").expect("stored on the PC");
-        assert_eq!(store.1["data"], shroudlink_sdk::json!({ "hud": true, "notify": false }), "both switches, as a store replaces");
-        assert_eq!(fight_over(&mut m, &mut host), 0);
-        // the next session reads it back
-        let mut next = Meter::default();
-        next.on_message(&mut host.host(), 2, &shroudlink_sdk::json!({ "mod": ID, "op": "stored", "data": { "hud": true, "notify": false } }));
-        assert!(next.notify_off.contains(&2) && !next.hud_off.contains(&2));
     }
 
     #[test]

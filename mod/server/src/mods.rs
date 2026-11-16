@@ -162,11 +162,6 @@ fn addon_layout(client: ClientId, message: &Value) {
 }
 
 /// The Steam name an addon sent: no control characters, at most 32 characters.
-/// The SteamID64 an addon reported (a string, as JSON numbers cannot hold every u64).
-fn steam_id(message: &Value) -> Option<u64> {
-    message.get("steam_id")?.as_str()?.parse().ok().filter(|&id| id != 0)
-}
-
 fn player_name(message: &Value) -> Option<String> {
     let name: String = message.get("name")?.as_str()?.chars().filter(|c| !c.is_control()).take(32).collect();
     (!name.trim().is_empty()).then_some(name)
@@ -291,18 +286,11 @@ pub(crate) fn message(host: &mut Host, client: ClientId, message: &Value) {
             Some("hello_again") => join(host, client),
             Some("identify") => {
                 let pages: Vec<u32> = message.get("pages").and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_u64().map(|p| p as u32)).collect();
-                if let Some(id) = steam_id(message) {
-                    crate::world::account_client(client.0, id);
-                }
                 crate::world::identify(client.0, &pages, player_name(message));
             }
             Some("name") => {
-                let account = steam_id(message);
-                if let Some(id) = account {
-                    crate::world::account_client(client.0, id);
-                }
                 if let Some(name) = player_name(message) {
-                    log!("shroudlink: client {:016x} is {name}{}", client.0, if account.is_some() { ", Steam account known" } else { "" });
+                    log!("shroudlink: client {:016x} is {name}", client.0);
                     crate::world::name_client(client.0, name);
                 }
             }

@@ -91,7 +91,6 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `position(entity)` | position in metres `[x, y (up), z]` |
 | `teleport(entity, [x, y, z])` | moves it; a player sees itself there right away |
 | `player_of(client)` | the player entity of an addon session (known once that player has opened a chest screen this session) |
-| `player_account(player) -> Option<u64>` | the player's SteamID64, reported by their addon (core v9, addons after 0.7.2): the key for progress a mod keeps per account, since entity ids change every session. It names the account, not the character, and the addon reports it itself |
 | `player_name(player)` | the player's Steam name, sent by their addon (core v5); `None` for players without the addon |
 | `component(entity, "TypeName")` | the raw bytes of any of the 686 component types (`shroudlink_sdk::components::COMPONENT_TYPES`); field offsets are in the reflection data |
 | `set_component(entity, "TypeName", &bytes)` | overwrites a component on the server (exact size); whether clients see it depends on the component's replication |
@@ -102,8 +101,6 @@ fn on_game_event(&mut self, events: &Events, event: &GameEvent) {
 | `give_items(entity, item, count)` | creates plain stackable items in an inventory through the game's own function (core v7, feature `items`); never in a player, nothing with durability or rolled stats. It makes items out of nothing: make the player pay for them |
 | `remove_items(entity, slot, count)` | removes items from a slot (core v7; not a player's; plain items only) |
 | `entities_near(entity, radius, "TypeName")` | loaded entities with a component of that type around an entity: stations (`FactoryStation`), NPCs (`ActiveNpcState`) … (core v6). It scans every loaded entity, so call it every few seconds, not every frame |
-| `attribute(entity, attr::STRENGTH_BASE) -> Option<f64>` | any attribute slot of an entity (core v9, feature `attributes`): Level, Level_Max, Strength_Base, Health_Max_Adder, DamageMod_Multiplier … The ids are in `shroudlink_sdk::attr` (`attr::id_of("Strength_Base")` by name) |
-| `set_attribute(entity, id, value) -> bool` | writes a slot through the game's own setter; its formulas then recompute what depends on it (Strength from Strength_Base, health max from its adder). Write the inputs (`_BASE`, `_ADDER`, `_MULTIPLIER`), not the result or the `_FLAME_BASE` slots the game rewrites every tick. Most attributes are rebuilt when a player spawns: re-apply after each join. A player's Level and Experience are saved with the character and are refused. `add_attribute(entity, id, delta)` adds to a slot |
 | `apply_buff(entity, "guid", seconds)` | gives an entity a vanilla buff by the Guid of its `BuffType`, the way an item or spell would (core v5), and keeps it up for `seconds` (0: once; also ends a kept buff). Item buffs often last only 0.3 s on their own. Clients show its effects from their own data, so no client files are needed |
 
 `components::world_position(&bytes, offset)` reads a `keen::WorldPosition` in metres.
@@ -151,6 +148,6 @@ a length, and game calls are plain C functions taking the opaque `game` pointer 
 current callback.
 
 - v2 appended inventory events to the v1 layout, v3 appended game events, and v5
-  appended `on_tick` (`HostApi` v5: `apply_buff`; v6: `entities_near`, `move_items`; v7: `give_items`, `remove_items`; v8: `world_chest_name`; v9: `attribute`, `set_attribute`, `player_account`). The host still loads older mods; they
+  appended `on_tick` (`HostApi` v5: `apply_buff`; v6: `entities_near`, `move_items`; v7: `give_items`, `remove_items`). The host still loads older mods; they
   get no callbacks their version does not know.
 - New host functions are only ever appended.

@@ -146,11 +146,6 @@ disk. Every push and pull request is tested and built there too.
   scans look up ids only up to 65536 past the highest one seen (`world::scan_around`).
 - Client UI: game panel styles mask and overhang (see MODDING.md); boxes are drawn with
   `Api::fill`. A `<` in a label hides the rest of it.
-- Attributes (`attributes.rs`): a group (`Strength`) is a component of that name; slots are
-  found by id in the game's attribute registry, which no context leads to: a detour on the
-  lookup remembers what the game passes. Write through the typed setters (or the s32
-  recompute) so the formulas run. A player's Level and Experience are saved with the
-  character and are never written.
 - NPC AI: the live `ActiveNpcState` is `DynamicActiveNpcState` (+0 state, +2 decision,
   `active_npc::State` / `Decision`); stations say who may use them in
   `ActiveNpcTarget.npcType`.

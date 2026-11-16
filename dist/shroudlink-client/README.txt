@@ -39,8 +39,7 @@ WHAT YOU GET
               Other players see your Steam name there.
               During and after a fight a small panel in the bottom right shows
               everyone's damage as bars. Open any menu (e.g. B) to drag it
-              somewhere else. The panel and the message at the end of a
-              fight can each be switched off on the Damage meter page.
+              somewhere else; switch it off on the Damage meter page.
   Don't want one of them? Click ON next to it in the list to switch it off on
   your PC: its windows, panels, rims and keys disappear for you (on the server it
   keeps running, e.g. your locks still protect your slots). Click OFF to get it back.

@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "ascension"
-version = "0.8.1"
-dependencies = [
- "serde_json",
- "shroudlink-sdk",
-]
-
-[[package]]
 name = "assistants"
 version = "0.8.1"
 dependencies = [

@@ -39,27 +39,23 @@ impl Module {
 
     /// Finds the unique match of an IDA-style pattern ("48 8B ?? 05") in `.text`.
     pub fn find(&self, pattern: &str) -> Result<usize, String> {
-        match self.find_all(pattern, 2).as_slice() {
-            [one] => Ok(*one),
-            [] => Err(format!("pattern not found: {pattern}")),
-            _ => Err(format!("pattern not unique: {pattern}")),
-        }
-    }
-
-    /// Up to `max` matches of a pattern in `.text`, for code the game has in several
-    /// copies (templates that differ only in what they call).
-    pub fn find_all(&self, pattern: &str, max: usize) -> Vec<usize> {
         let pat: Vec<Option<u8>> = pattern
             .split_whitespace()
             .map(|t| if t.starts_with('?') { None } else { u8::from_str_radix(t, 16).ok() })
             .collect();
-        self.text
+        let hits: Vec<usize> = self
+            .text
             .windows(pat.len())
             .enumerate()
             .filter(|(_, w)| pat.iter().zip(w.iter()).all(|(p, b)| p.map_or(true, |p| p == *b)))
             .map(|(i, _)| self.text_start + i)
-            .take(max)
-            .collect()
+            .take(2)
+            .collect();
+        match hits.as_slice() {
+            [one] => Ok(*one),
+            [] => Err(format!("pattern not found: {pattern}")),
+            _ => Err(format!("pattern not unique: {pattern}")),
+        }
     }
 
     pub fn rva(&self, addr: usize) -> usize {

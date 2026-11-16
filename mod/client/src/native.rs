@@ -59,28 +59,6 @@ const SIG_PLAYER_MENU: &str = "89 54 24 10 88 4C 24 08 55 53 56 57";
 const PLAYER_PAGE_OFFSET: usize = 0x31e88;
 /// A page index without a page: the player menu then draws only its frame.
 const NO_PAGE: u64 = 7;
-/// Page index of the player menu's SKILLS tab (the last game tab).
-const SKILLS_PAGE: u64 = 6;
-/// Where the SKILLS page keeps its view between visits (holder + 0x32908, two f32; zero
-/// or less: centred on the tree, `FUN_7ff7ee7c7970`).
-const SKILLS_VIEW: usize = 0x32908;
-/// The game tree's view, put aside while a mod tree is shown (which starts centred).
-static GAME_TREE_VIEW: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
-
-/// Keeps the game tree's view and the mod tree's apart: entering a mod tree starts it
-/// centred, leaving it gives the game tree its view back.
-unsafe fn swap_tree_view(holder: usize, tree: bool) {
-    let view = (holder + SKILLS_VIEW) as *mut u64;
-    let mut saved = GAME_TREE_VIEW.lock().unwrap();
-    match (tree, saved.is_some()) {
-        (true, false) => {
-            *saved = Some(*view);
-            *view = 0;
-        }
-        (false, true) => *view = saved.take().unwrap_or(0),
-        _ => {}
-    }
-}
 const SIG_TAB_LIST: &str = "48 8B C4 48 89 58 08 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A1";
 /// `FUN_7ff6233017b0(action, style)`: draws the key bound to an input action (the key
 /// labels above the player menu tabs). Its first call, `FUN_7ff6234819b0(out, input,
@@ -146,27 +124,6 @@ impl UiStr {
     }
     pub fn text(s: &str) -> UiStr {
         UiStr { ptr: s.as_ptr(), len: s.len(), key: 0 }
-    }
-    /// A text as the game's text lookup returns it: with the game's FNV-1a 64 over its
-    /// bytes, taken as signed chars (`FUN_7ff7ee610f20`). `s` must outlive its use.
-    pub fn hashed(s: &str) -> UiStr {
-        let key = s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as i8 as i64 as u64).wrapping_mul(0x100_0000_01b3));
-        UiStr { ptr: s.as_ptr(), len: s.len(), key }
-    }
-}
-
-/// Address of the game-UI global (`*it` is the UI being built), 0 before `install`.
-pub fn game_ui_global() -> usize {
-    API.get().map_or(0, |a| a.game_ui)
-}
-
-/// The game's text for a text key (the language the player runs), if it has one.
-pub fn text_of(key: u32) -> Option<String> {
-    let api = API.get()?;
-    let mut out = UiStr { ptr: std::ptr::null(), len: 0, key: 0 };
-    unsafe {
-        (api.loca_text)(&mut out, key);
-        (!out.ptr.is_null() && out.len > 0 && out.len <= 256).then(|| String::from_utf8_lossy(std::slice::from_raw_parts(out.ptr, out.len)).into_owned())
     }
 }
 
@@ -569,19 +526,14 @@ static NATIVE_MODS_TAB: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 static KEY_OVERRIDE: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 const MODS_TAB_LABEL: &str = "Mods";
 
-/// `KEY_OVERRIDE` value for a tab without a key: the key lookup reports none.
-const NO_KEY: u16 = u16::MAX;
-
 unsafe extern "system" fn key_resolve_hook(out: *mut u8, input: usize, action: u32) -> *mut u8 {
     let api = API.get().unwrap();
     let r = api.key_resolve.as_ref().unwrap().call(out, input, action);
     let code = KEY_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
     if code != 0 && !out.is_null() {
         std::ptr::write_bytes(out, 0, KEY_DESC_SIZE);
-        if code != NO_KEY {
-            *out = 1;
-            *(out.add(2) as *mut u16) = code;
-        }
+        *out = 1;
+        *(out.add(2) as *mut u16) = code;
     }
     r
 }
@@ -596,7 +548,7 @@ unsafe fn draw_native_mods_tab(api: &Api) {
     *(entry.as_mut_ptr().add(TAB_LABEL) as *mut *const u8) = MODS_TAB_LABEL.as_ptr();
     *(entry.as_mut_ptr().add(TAB_LABEL_LEN) as *mut u64) = MODS_TAB_LABEL.len() as u64;
     *(entry.as_mut_ptr().add(TAB_KEY) as *mut u64) = shroudlink::string_id(b"shroudlinkModsTab");
-    entry[TAB_ACTIVE] = crate::ui::mods_list_open() as u8;
+    entry[TAB_ACTIVE] = crate::ui::mods_page_open() as u8;
     entry[TAB_MARKS] = 0;
     entry[TAB_MARKS + 1] = 0;
     crate::ui::mods_tab_drawn();
@@ -606,23 +558,6 @@ unsafe fn draw_native_mods_tab(api: &Api) {
     KEY_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
     if mouse_click_in(rect) {
         crate::ui::mods_tab_clicked();
-    }
-    // the mods' own tabs (Paragon …) after MODS, the same way, without a key
-    for (i, (label, open)) in crate::ui::mod_tabs().into_iter().enumerate() {
-        let mut entry = *TAB_TEMPLATE.lock().unwrap();
-        *(entry.as_mut_ptr().add(TAB_LABEL) as *mut *const u8) = label.as_ptr();
-        *(entry.as_mut_ptr().add(TAB_LABEL_LEN) as *mut u64) = label.len() as u64;
-        *(entry.as_mut_ptr().add(TAB_KEY) as *mut u64) = shroudlink::string_id(format!("shroudlinkModTab{i}").as_bytes());
-        entry[TAB_ACTIVE] = open as u8;
-        entry[TAB_MARKS] = 0;
-        entry[TAB_MARKS + 1] = 0;
-        let mut rect = [0f32; 4];
-        KEY_OVERRIDE.store(NO_KEY, std::sync::atomic::Ordering::Relaxed);
-        api.tab_widget.call(entry.as_mut_ptr(), rect.as_mut_ptr());
-        KEY_OVERRIDE.store(0, std::sync::atomic::Ordering::Relaxed);
-        if mouse_click_in(rect) {
-            crate::ui::mod_tab_clicked(i);
-        }
     }
 }
 
@@ -676,10 +611,7 @@ unsafe extern "system" fn tab_widget_hook(entry: *mut u8, rect: *mut f32) -> u64
         // hook, so it is detected here; the call has filled `rect` with the tab's layout
         // rectangle (x, y, w, h, UI units)
         let page = PLAYER_TAB_KEYS.iter().position(|k| k.load(std::sync::atomic::Ordering::Relaxed) == key);
-        // with a mod tree the game's SKILLS page is shown under the mod's tab: a click on the
-        // SKILLS tab itself writes the page it already has, so it is hit-tested here too
-        let hit_test = !NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) || crate::ui::tree_tab_open();
-        if let Some(page) = page.filter(|_| hit_test) {
+        if let Some(page) = page.filter(|_| !NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed)) {
             if mouse_click_in(*(rect as *const [f32; 4])) {
                 CHOSEN_PAGE.store(page as u64, std::sync::atomic::Ordering::Relaxed);
             }
@@ -691,16 +623,11 @@ unsafe extern "system" fn tab_widget_hook(entry: *mut u8, rect: *mut f32) -> u64
 unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
     let api = API.get().unwrap();
     let page = api.holder().map(|h| (h + PLAYER_PAGE_OFFSET) as *mut u64);
-    if let Some(holder) = api.holder() {
-        swap_tree_view(holder, crate::ui::tree_tab_open());
-    }
     match page {
-        // the MODS page replaces the game page: hide it for this call only; a mod's skill
-        // tree shows the game's SKILLS page instead (skilltree.rs swaps its lists)
+        // the MODS page replaces the game page: hide it for this call only
         Some(page) if crate::ui::mods_page_open() => {
             let saved = *page;
-            let tree = crate::ui::tree_tab_open();
-            *page = if tree { SKILLS_PAGE } else { NO_PAGE };
+            *page = NO_PAGE;
             let r = api.player_menu.call(menu, mode);
             // the tab row writes its selection into this field every frame. With the
             // game-drawn MODS tab the row has one tab more than the game's and NO_PAGE is
@@ -708,7 +635,7 @@ unsafe extern "system" fn player_menu_hook(menu: u8, mode: i32) -> u64 {
             // addon-drawn tab leaves the game's tabs alone, the selection comes back as the
             // last tab every frame, and clicks are hit-tested in tab_widget_hook instead.
             let chosen = match *page {
-                written if written < NO_PAGE && NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) && !(tree && written == SKILLS_PAGE) => written,
+                written if written < NO_PAGE && NATIVE_MODS_TAB.load(std::sync::atomic::Ordering::Relaxed) => written,
                 _ => CHOSEN_PAGE.swap(NO_PAGE, std::sync::atomic::Ordering::Relaxed),
             };
             if chosen < NO_PAGE {
