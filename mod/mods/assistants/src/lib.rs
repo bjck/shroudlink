@@ -96,8 +96,41 @@ pub struct Assistants {
     news: Vec<(u32, String, Kind, Vec<(u32, u32)>)>,
     /// the tick of the last such notification
     news_sent: u32,
-    /// open orders that could not go on, by order id: the reason announced last (see [`stuck`])
-    stuck: HashMap<u32, String>,
+    /// open orders that cannot go on, by order id (see [`stuck_due`])
+    stuck: HashMap<u32, Stuck>,
+    /// when the mod started, for [`STUCK_AFTER`]
+    clock: Option<std::time::Instant>,
+}
+
+/// How long an order must be stuck for the same reason before it is announced: right after
+/// a player arrives, the chests further away show up only after a while, so a reason seen
+/// once may be gone at the next step (seen in game: 25 s). The window shows it at once.
+const STUCK_AFTER: f64 = 60.0;
+
+/// An order that cannot go on: the reason's key, since when (seconds), whether told.
+struct Stuck {
+    key: String,
+    since: f64,
+    told: bool,
+}
+
+/// The text to announce for `order` now, if any: once per reason, after [`STUCK_AFTER`].
+/// `reason` is [`stuck`]'s answer for this step; none forgets the order, so being stuck
+/// again later is announced again.
+fn stuck_due(watch: &mut HashMap<u32, Stuck>, order: u32, reason: Option<(String, String)>, now: f64) -> Option<String> {
+    let Some((key, text)) = reason else {
+        watch.remove(&order);
+        return None;
+    };
+    let entry = watch.entry(order).or_insert_with(|| Stuck { key: key.clone(), since: now, told: false });
+    if entry.key != key {
+        *entry = Stuck { key, since: now, told: false };
+    }
+    if entry.told || now - entry.since < STUCK_AFTER {
+        return None;
+    }
+    entry.told = true;
+    Some(text)
 }
 
 /// Why an order cannot go on by itself, for a notification: (key, text). `uncovered`: what
@@ -586,6 +619,7 @@ impl Assistants {
         let open: Vec<(u32, u32)> = self.orders.list.iter().filter(|o| !o.done()).filter_map(|o| Some((o.parent?, o.product))).collect();
         let present: Vec<u32> = at.keys().copied().collect();
         let chains: HashMap<u32, (Vec<u32>, usize)> = self.orders.list.iter().filter(|o| !o.done()).map(|o| (o.id, self.orders.ancestors(o))).collect();
+        let now = self.clock.get_or_insert_with(std::time::Instant::now).elapsed().as_secs_f64();
         for order in self.orders.list.iter_mut().filter(|o| !o.done()) {
             let before = (order.produced, order.status.clone());
             order.status = match at.get(&order.npc) {
@@ -609,15 +643,12 @@ impl Assistants {
                     order.status = Status::Waiting(coming);
                 }
             }
-            // stuck: told once per reason, as the window may be closed
-            if let Some((key, text)) = stuck(&order.status, &uncovered, names::item) {
-                if self.stuck.get(&order.id) != Some(&key) {
-                    if !muted.contains(&order.npc) {
-                        finished.push(format!("{} is stuck on {} {} ({text}).", npc_name(order.npc), order.amount, names::item(order.product)));
-                    }
-                    log!("assistants: order {} stuck: {text}", order.id);
-                    self.stuck.insert(order.id, key);
+            // stuck for a while: told once per reason, as the window may be closed
+            if let Some(text) = stuck_due(&mut self.stuck, order.id, stuck(&order.status, &uncovered, names::item), now) {
+                if !muted.contains(&order.npc) {
+                    finished.push(format!("{} is stuck on {} {} ({text}).", npc_name(order.npc), order.amount, names::item(order.product)));
                 }
+                log!("assistants: order {} stuck: {text}", order.id);
             }
             // at the stations the order runs on
             if let (Some(&entity), Some(recipe)) = (at.get(&order.npc), table().recipe(order.recipe)) {
@@ -935,6 +966,29 @@ mod tests {
         for fine in [Status::Running, Status::Away, Status::Busy("the Oven is making Bread".into()), Status::Done] {
             assert_eq!(stuck(&fine, &[], name), None);
         }
+    }
+
+    #[test]
+    fn a_stuck_order_is_told_once_after_a_minute() {
+        let mut watch = HashMap::new();
+        let ore = || Some(("needs [5]".to_string(), "needs 3 Iron Ore".to_string()));
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 0.0), None, "may be the base still loading");
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 30.0), None);
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 60.0).as_deref(), Some("needs 3 Iron Ore"));
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 65.0), None, "once");
+        // a new reason starts its own minute
+        let water = || Some(("water".to_string(), "needs water".to_string()));
+        assert_eq!(stuck_due(&mut watch, 1, water(), 70.0), None);
+        assert_eq!(stuck_due(&mut watch, 1, water(), 130.0).as_deref(), Some("needs water"));
+        // it went on: stuck again later is told again
+        assert_eq!(stuck_due(&mut watch, 1, None, 135.0), None);
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 140.0), None);
+        assert_eq!(stuck_due(&mut watch, 1, ore(), 200.0).as_deref(), Some("needs 3 Iron Ore"));
+        // gone before the minute was up (the chests showed up): never told
+        assert_eq!(stuck_due(&mut watch, 2, ore(), 0.0), None);
+        assert_eq!(stuck_due(&mut watch, 2, None, 25.0), None);
+        assert_eq!(stuck_due(&mut watch, 2, ore(), 30.0), None);
+        assert_eq!(stuck_due(&mut watch, 2, ore(), 80.0), None, "its minute started again at 30 s");
     }
 
     #[test]
